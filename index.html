@@ -214,15 +214,7 @@
             <div class="filter-group">
                 <label>Status</label>
                 <select class="status-dropdown" id="statusFilter">
-                    <option value="">All Statuses</option>
-                    <option value="Confirmed Shipment" selected>🔒 Confirmed Shipment</option>
-                    <option value="Cancelled Order">🔒 Cancelled Order</option>
-                    <option value="Checkout Started">🔒 Checkout Started</option>
-                    <option value="Fulfilled Order">🔒 Fulfilled Order</option>
-                    <option value="Fulfilled Partial Order">🔒 Fulfilled Partial Order</option>
-                    <option value="Ordered Product">🔒 Ordered Product</option>
-                    <option value="Placed Order">🔒 Placed Order</option>
-                    <option value="Refunded Order">🔒 Refunded Order</option>
+                    <option value="Placed Order" selected>Placed Order</option>
                 </select>
             </div>
         </div>
@@ -239,7 +231,7 @@
                     <th>Send date</th>
                     <th>Open rate</th>
                     <th>Click rate</th>
-                    <th style="text-align: right;">Confirmed Shipment</th>
+                    <th style="text-align: right;">Placed Order</th>
                 </tr>
             </thead>
             <tbody id="campaignBody">
@@ -405,42 +397,94 @@
         }
 
         document.getElementById('statusFilter').addEventListener('change', async (e) => {
-            const selectedStatus = e.target.value;
-            console.log('Filter changed to:', selectedStatus);
-            
-            if (!selectedStatus) {
-                // Show all campaigns if no filter selected
-                renderCampaigns(campaignsData);
-                return;
-            }
+            // Always use Placed Order
+            const selectedStatus = 'Placed Order';
+            console.log('Refreshing Placed Order data...');
             
             // Show loading
             const tbody = document.getElementById('campaignBody');
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;">Loading filtered data...</td></tr>';
+            const loading = document.getElementById('loading');
+            loading.style.display = 'block';
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;">Loading data...</td></tr>';
             
             try {
-                // Fetch events for this status
+                // Fetch fresh campaign data
+                console.log('Fetching fresh campaign data...');
+                const campaignsResponse = await fetch(`${API_BASE}/campaigns`);
+                const campaignsResult = await campaignsResponse.json();
+                
+                let freshCampaignsData = [];
+                if (campaignsResult.success) {
+                    freshCampaignsData = campaignsResult.data;
+                    if (freshCampaignsData.length === 0) {
+                        freshCampaignsData = SAMPLE_DATA;
+                    }
+                } else {
+                    console.warn('Failed to fetch fresh campaigns, using cached data');
+                    freshCampaignsData = campaignsData;
+                }
+                
+                // Fetch Placed Order events
+                console.log('Fetching Placed Order events...');
                 const response = await fetch(`${API_BASE}/campaigns/by-status?status=${encodeURIComponent(selectedStatus)}`);
                 const result = await response.json();
                 
                 if (result.success) {
-                    console.log(`Found ${result.total} events for status: ${selectedStatus}`);
+                    console.log(`Found ${result.total} Placed Order events`);
                     
-                    // For now, still show all campaigns but could filter based on attribution
-                    // In a full implementation, you would match events to campaigns
-                    renderCampaigns(campaignsData);
+                    // Group events by campaignId and calculate metrics
+                    const campaignMetrics = {};
                     
-                    // Show a message about the filter
+                    result.data.forEach(event => {
+                        const campaignId = event.campaignId;
+                        if (!campaignId) {
+                            return; // Skip events without campaign attribution
+                        }
+                        
+                        if (!campaignMetrics[campaignId]) {
+                            campaignMetrics[campaignId] = {
+                                revenue: 0,
+                                conversions: 0
+                            };
+                        }
+                        
+                        const revenue = event.revenue || 0;
+                        if (revenue > 0) {
+                            campaignMetrics[campaignId].revenue += revenue;
+                            campaignMetrics[campaignId].conversions += 1;
+                        }
+                    });
+                    
+                    // Update campaign data with metrics
+                    const updatedCampaigns = freshCampaignsData.map(campaign => {
+                        const metrics = campaignMetrics[campaign.id];
+                        if (metrics) {
+                            return {
+                                ...campaign,
+                                revenue: metrics.revenue,
+                                conversions: metrics.conversions
+                            };
+                        } else {
+                            return {
+                                ...campaign,
+                                revenue: 0,
+                                conversions: 0
+                            };
+                        }
+                    });
+                    
+                    campaignsData = freshCampaignsData;
+                    renderCampaigns(updatedCampaigns);
+                    
                     const errorDiv = document.getElementById('error');
-                    errorDiv.textContent = `Showing campaigns with "${selectedStatus}" attribution (${result.total} events found)`;
-                    errorDiv.style.display = 'block';
-                    errorDiv.style.background = '#e3f2fd';
-                    errorDiv.style.color = '#1976d2';
+                    errorDiv.style.display = 'none';
                 } else {
-                    renderCampaigns(campaignsData);
+                    showError('Failed to load data: ' + (result.error || 'Unknown error'));
+                    renderCampaigns(freshCampaignsData);
                 }
             } catch (error) {
-                console.error('Filter error:', error);
+                console.error('Error:', error);
+                showError('Error loading data: ' + error.message);
                 renderCampaigns(campaignsData);
             }
         });

@@ -31,10 +31,37 @@ function getLast30Days() {
   };
 }
 
+// Revenue extraction function for Placed Order events
+function extractRevenue(props, eventId = 'unknown') {
+  if (!props) return 0;
+
+  // Klaviyo provides revenue in $value for Placed Order events
+  if (props['$value'] !== undefined && props['$value'] !== null) {
+    const revenue = Number(props['$value']);
+    console.log(`[Revenue] Event ${eventId}: Found $value = ${revenue}`);
+    return revenue;
+  }
+
+  // Fallback revenue fields
+  const fallbackFields = ['value', 'Value', 'order_total', 'total_price', 'amount', 'revenue'];
+
+  for (const field of fallbackFields) {
+    if (props[field] !== undefined && props[field] !== null) {
+      const numValue = Number(props[field]);
+      if (!isNaN(numValue) && numValue > 0) {
+        console.log(`[Revenue] Event ${eventId}: Found ${field} = ${numValue}`);
+        return numValue;
+      }
+    }
+  }
+
+  return 0;
+}
+
 // Endpoint to fetch campaigns
 app.get('/api/campaigns', async (req, res) => {
   try {
-    const { start, end } = getLast30Days();
+    const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
     
     console.log('Fetching campaigns created after:', startTimestamp);
@@ -79,11 +106,9 @@ app.get('/api/campaigns', async (req, res) => {
 
     console.log(`Found ${emailCampaigns.length} email campaigns and ${smsCampaigns.length} SMS campaigns`);
 
-    
-    // Get the Placed Order metric ID once (needed for all campaign metrics)
+    // Get Placed Order metric ID
     let placedOrderMetricId = null;
     try {
-      console.log('Fetching metrics list...');
       const metricsListResponse = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
         headers: {
           'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
@@ -93,12 +118,8 @@ app.get('/api/campaigns', async (req, res) => {
       });
 
       const metrics = metricsListResponse.data?.data || [];
-      console.log(`Found ${metrics.length} total metrics`);
-      
-      // Find Placed Order metric
       const placedOrderMetric = metrics.find(m => 
         m.attributes?.name === 'Placed Order' || 
-        m.attributes?.name === 'placed_order' ||
         m.attributes?.name?.toLowerCase().includes('placed order')
       );
       
@@ -106,21 +127,10 @@ app.get('/api/campaigns', async (req, res) => {
         placedOrderMetricId = placedOrderMetric.id;
         console.log(`✓ Using Placed Order metric ID: ${placedOrderMetricId}`);
       } else {
-        // Try to use any order-related metric
-        const orderMetric = metrics.find(m => 
-          m.attributes?.name?.toLowerCase().includes('order')
-        );
-        if (orderMetric) {
-          placedOrderMetricId = orderMetric.id;
-          console.log(`✓ Using order metric: ${orderMetric.attributes.name} (${placedOrderMetricId})`);
-        } else {
-          console.log('Available metrics:', metrics.map(m => m.attributes?.name).join(', '));
-          console.log('Warning: Could not find order metric. Campaign metrics may be limited.');
-        }
+        console.log('Warning: Could not find Placed Order metric. Campaign metrics may be limited.');
       }
     } catch (error) {
-      console.log('Warning: Could not fetch metrics list:', error.response?.data?.errors?.[0]?.detail || error.message);
-      console.log('Full error:', error.response?.data || error.message);
+      console.log('Warning: Could not fetch metrics list:', error.message);
     }
     
     // Fetch metrics for each campaign
@@ -191,7 +201,7 @@ app.get('/api/campaigns', async (req, res) => {
                 }
               }
             );
-
+            console.log('Metrics response:', JSON.stringify(metricsResponse.data, null, 2));
             const results = metricsResponse.data?.data?.attributes?.results || [];
             if (results.length > 0) {
               const stats = results[0].statistics;
@@ -218,9 +228,9 @@ app.get('/api/campaigns', async (req, res) => {
             console.log(`  Waiting ${waitTime}s before next campaign (rate limit: 2/min)...`);
             await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
           }
-        } else {
-          console.log(`  Skipping metrics (no conversion metric ID available)`);
-        }
+         } else {
+           console.log(`  Skipping metrics (no Placed Order metric ID available)`);
+         }
       }
 
       campaignsWithMetrics.push(campaignData);
@@ -251,30 +261,24 @@ app.get('/api/campaigns', async (req, res) => {
   }
 });
 
-// Endpoint to fetch campaign metrics by status filter
+// Endpoint to fetch Placed Order events by campaign
 app.get('/api/campaigns/by-status', async (req, res) => {
   try {
-    const { status } = req.query; // e.g., "Confirmed Shipment"
+    const { status } = req.query;
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
     
-    console.log(`Fetching events with status: ${status}`);
+    // Only support Placed Order
+    if (status !== 'Placed Order') {
+      return res.json({
+        success: false,
+        error: 'Only "Placed Order" status is supported'
+      });
+    }
     
-    // Map Shopify status to Klaviyo metric names
-    const metricMap = {
-      'Confirmed Shipment': 'Fulfilled Order',
-      'Cancelled Order': 'Cancelled Order',
-      'Checkout Started': 'Started Checkout',
-      'Fulfilled Order': 'Fulfilled Order',
-      'Fulfilled Partial Order': 'Fulfilled Order',
-      'Ordered Product': 'Ordered Product',
-      'Placed Order': 'Placed Order',
-      'Refunded Order': 'Refunded Order'
-    };
+    console.log('Fetching Placed Order events...');
     
-    const metricName = metricMap[status] || 'Placed Order';
-    
-    // First, get the metric ID for this metric name
+    // Get Placed Order metric ID
     const metricsResponse = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
       headers: {
         'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
@@ -284,22 +288,21 @@ app.get('/api/campaigns/by-status', async (req, res) => {
     });
     
     const metrics = metricsResponse.data?.data || [];
-    const targetMetric = metrics.find(m => 
-      m.attributes?.name === metricName ||
-      m.attributes?.name?.toLowerCase() === metricName.toLowerCase()
+    const placedOrderMetric = metrics.find(m => 
+      m.attributes?.name === 'Placed Order' ||
+      m.attributes?.name?.toLowerCase() === 'placed order'
     );
     
-    if (!targetMetric) {
+    if (!placedOrderMetric) {
       return res.json({
         success: false,
-        error: `Metric "${metricName}" not found in your account`,
-        availableMetrics: metrics.map(m => m.attributes?.name)
+        error: 'Placed Order metric not found'
       });
     }
     
-    console.log(`Using metric ID: ${targetMetric.id} for "${metricName}"`);
+    console.log(`Using Placed Order metric ID: ${placedOrderMetric.id}`);
     
-    // Now fetch events for this metric
+    // Fetch Placed Order events
     const response = await axios.get(`${KLAVIYO_BASE_URL}/events/`, {
       headers: {
         'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
@@ -307,38 +310,102 @@ app.get('/api/campaigns/by-status', async (req, res) => {
         'Accept': 'application/json'
       },
       params: {
-        'filter': `equals(metric_id,"${targetMetric.id}"),greater-than(datetime,${startTimestamp})`,
+        'filter': `equals(metric_id,"${placedOrderMetric.id}"),greater-than(datetime,${startTimestamp})`,
         'fields[event]': 'datetime,event_properties',
         'include': 'attributions'
       }
     });
 
     const events = response.data.data || [];
+    const included = response.data.included || [];
+    
+    console.log(`Processing ${events.length} Placed Order events`);
     
     // Process events to extract attribution data
     const processedEvents = events.map(event => {
       const attrs = event.attributes || {};
+      const relationships = event.relationships || {};
+      const eventProps = attrs.event_properties || {};
+      
+      // Get campaign attribution
+      let campaignId = null;
+      
+      // Method 1: From event properties
+      campaignId = eventProps['$attributed_campaign'] || 
+                   eventProps.campaign_id ||
+                   eventProps['Campaign ID'];
+      
+      // Method 2: From relationships
+      if (!campaignId && relationships.attributions) {
+        const attributionIds = relationships.attributions.data || [];
+        attributionIds.forEach(attrRef => {
+          const attribution = included.find(inc => inc.id === attrRef.id && inc.type === 'attribution');
+          if (attribution) {
+            campaignId = attribution.attributes?.campaign_id || 
+                        attribution.attributes?.message_id;
+          }
+        });
+      }
+      
+      // Method 3: From direct campaign relationships
+      if (!campaignId && relationships.campaign) {
+        campaignId = relationships.campaign.data?.id;
+      }
+      
+      // Extract revenue
+      const revenue = extractRevenue(eventProps, event.id);
+      
+      if (revenue > 0 && campaignId) {
+        console.log(`[Revenue] Event ${event.id}: Revenue = ${revenue}, Campaign = ${campaignId}`);
+      }
+      
       return {
         id: event.id,
         type: event.type,
         attributes: {
           datetime: attrs.datetime,
-          event_properties: attrs.event_properties || {},
-          metric_id: targetMetric.id // Use the metric ID we already know from the filter
+          event_properties: eventProps,
+          metric_id: placedOrderMetric.id
         },
-        // Extract campaign attribution if available
-        campaignId: attrs.event_properties?.['$attributed_campaign'] || 
-                   attrs.event_properties?.campaign_id ||
-                   attrs.event_properties?.['Campaign ID'] || null
+        campaignId: campaignId,
+        revenue: revenue
       };
     });
+
+    // Calculate summary
+    const totalRevenue = processedEvents.reduce((sum, event) => sum + (event.revenue || 0), 0);
+    const eventsWithRevenue = processedEvents.filter(e => e.revenue > 0).length;
+    const eventsWithCampaign = processedEvents.filter(e => e.campaignId).length;
+    
+    console.log(`\n[Summary] Placed Order Events`);
+    console.log(`[Summary] Total events: ${processedEvents.length}`);
+    console.log(`[Summary] Events with revenue: ${eventsWithRevenue}`);
+    console.log(`[Summary] Events with campaign attribution: ${eventsWithCampaign}`);
+    console.log(`[Summary] Total revenue: ${totalRevenue.toFixed(2)}`);
+    
+    // Group by campaign
+    const campaignStats = {};
+    processedEvents.forEach(event => {
+      if (event.campaignId) {
+        if (!campaignStats[event.campaignId]) {
+          campaignStats[event.campaignId] = { revenue: 0, events: 0 };
+        }
+        campaignStats[event.campaignId].revenue += (event.revenue || 0);
+        campaignStats[event.campaignId].events += 1;
+      }
+    });
+    
+    Object.entries(campaignStats).forEach(([campaignId, stats]) => {
+      console.log(`[Summary]   Campaign ${campaignId}: ${stats.revenue.toFixed(2)} revenue, ${stats.events} events`);
+    });
+    console.log('');
 
     res.json({
       success: true,
       data: processedEvents,
       total: processedEvents.length,
-      metricName: metricName,
-      metricId: targetMetric.id
+      metricName: 'Placed Order',
+      metricId: placedOrderMetric.id
     });
 
   } catch (error) {
