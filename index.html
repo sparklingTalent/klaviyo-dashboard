@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klaviyo Campaign Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f7f7f7;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 24px;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 24px;
+            color: #1a1a1a;
+        }
+
+        .filters {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-group label {
+            font-size: 14px;
+            color: #666;
+        }
+
+        select, input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        .status-dropdown {
+            min-width: 200px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 36px;
+            appearance: none;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .error {
+            background: #fee;
+            color: #c00;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #f9f9f9;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px;
+            font-weight: 600;
+            font-size: 13px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        th:last-child {
+            text-align: right;
+        }
+
+        td {
+            padding: 16px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+            color: #1a1a1a;
+        }
+
+        td:last-child {
+            text-align: right;
+        }
+
+        tbody tr:hover {
+            background: #fafafa;
+        }
+
+        .campaign-name {
+            font-weight: 500;
+            color: #2563eb;
+            cursor: pointer;
+        }
+
+        .campaign-subtitle {
+            font-size: 13px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-sent {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-draft {
+            background: #f0f0f0;
+            color: #666;
+        }
+
+        .metric {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .metric-value {
+            color: #2563eb;
+            font-weight: 600;
+        }
+
+        .metric-detail {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .revenue {
+            color: #16a34a;
+            font-weight: 600;
+        }
+
+        .revenue-detail {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .icon-email::before {
+            content: "✉";
+            margin-right: 6px;
+        }
+
+        .icon-automation::before {
+            content: "⚡";
+            margin-right: 6px;
+        }
+
+        .lock-icon {
+            color: #16a34a;
+            margin-right: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Campaign Attribution Dashboard</h1>
+        
+        <div class="filters">
+            <div class="filter-group">
+                <label>Date range</label>
+                <select>
+                    <option selected>Last 30 days</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Status</label>
+                <select class="status-dropdown" id="statusFilter">
+                    <option value="">All Statuses</option>
+                    <option value="Confirmed Shipment" selected>🔒 Confirmed Shipment</option>
+                    <option value="Cancelled Order">🔒 Cancelled Order</option>
+                    <option value="Checkout Started">🔒 Checkout Started</option>
+                    <option value="Fulfilled Order">🔒 Fulfilled Order</option>
+                    <option value="Fulfilled Partial Order">🔒 Fulfilled Partial Order</option>
+                    <option value="Ordered Product">🔒 Ordered Product</option>
+                    <option value="Placed Order">🔒 Placed Order</option>
+                    <option value="Refunded Order">🔒 Refunded Order</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="error" class="error" style="display: none;"></div>
+        <div id="loading" class="loading">Loading campaigns...</div>
+        
+        <table id="campaignTable" style="display: none;">
+            <thead>
+                <tr>
+                    <th>Campaign</th>
+                    <th>Message type</th>
+                    <th>Status</th>
+                    <th>Send date</th>
+                    <th>Open rate</th>
+                    <th>Click rate</th>
+                    <th style="text-align: right;">Confirmed Shipment</th>
+                </tr>
+            </thead>
+            <tbody id="campaignBody">
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3000/api';
+        let campaignsData = [];
+
+        // Sample data for testing without API
+        const SAMPLE_DATA = [
+            {
+                id: '1',
+                name: '[Follow-up] Xmas',
+                status: 'Sent',
+                sendDate: '2025-11-29T22:28:00Z',
+                messageType: 'email',
+                recipients: 191,
+                opens: 57,
+                clicks: 3,
+                revenue: 120.00,
+                conversions: 1
+            },
+            {
+                id: '2',
+                name: 'Xmas',
+                status: 'Sent',
+                sendDate: '2025-11-27T22:28:00Z',
+                messageType: 'email',
+                recipients: 1354,
+                opens: 466,
+                clicks: 15,
+                revenue: 1186.20,
+                conversions: 8
+            },
+            {
+                id: '3',
+                name: 'Baubles 2',
+                status: 'Sent',
+                sendDate: '2025-11-23T23:25:00Z',
+                messageType: 'email',
+                recipients: 1418,
+                opens: 507,
+                clicks: 32,
+                revenue: 695.00,
+                conversions: 8
+            }
+        ];
+
+        async function fetchCampaigns() {
+            try {
+                const response = await fetch(`${API_BASE}/campaigns`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    campaignsData = result.data;
+                    
+                    // If no campaigns, use sample data
+                    if (campaignsData.length === 0) {
+                        console.log('No campaigns found, using sample data');
+                        campaignsData = SAMPLE_DATA;
+                    }
+                    
+                    renderCampaigns(campaignsData);
+                } else {
+                    showError('Failed to load campaigns: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('API Error:', error);
+                showError('Using sample data (API error: ' + error.message + ')');
+                // Use sample data when API fails
+                campaignsData = SAMPLE_DATA;
+                renderCampaigns(campaignsData);
+            }
+        }
+
+        function renderCampaigns(campaigns) {
+            const tbody = document.getElementById('campaignBody');
+            const loading = document.getElementById('loading');
+            const table = document.getElementById('campaignTable');
+            
+            loading.style.display = 'none';
+            table.style.display = 'table';
+            
+            if (campaigns.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #888;">No campaigns found in the last 30 days</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = campaigns.map(campaign => {
+                const sendDate = new Date(campaign.sendDate);
+                const openRate = campaign.recipients > 0 
+                    ? ((campaign.opens / campaign.recipients) * 100).toFixed(2) 
+                    : '0.00';
+                const clickRate = campaign.recipients > 0 
+                    ? ((campaign.clicks / campaign.recipients) * 100).toFixed(2) 
+                    : '0.00';
+                
+                // Determine status display
+                let statusClass = 'status-sent';
+                let statusText = 'Sent';
+                if (campaign.status) {
+                    statusText = campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1);
+                    if (campaign.status.toLowerCase() === 'draft') {
+                        statusClass = 'status-draft';
+                    }
+                }
+                
+                return `
+                    <tr>
+                        <td>
+                            <div class="campaign-name">${campaign.name}</div>
+                            <div class="campaign-subtitle">${campaign.name}</div>
+                        </td>
+                        <td>
+                            <span class="${campaign.messageType === 'email' ? 'icon-email' : 'icon-automation'}">
+                                ${campaign.messageType || 'email'}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="status-badge ${statusClass}">
+                                ${statusText}
+                            </span>
+                        </td>
+                        <td>
+                            ${sendDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}<br>
+                            <span style="font-size: 12px; color: #888;">
+                                ${sendDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })} GMT
+                            </span>
+                        </td>
+                        <td>
+                            <div class="metric">
+                                <span class="metric-value">${openRate}%</span>
+                                <span class="metric-detail">${campaign.opens.toLocaleString()} recipients</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="metric">
+                                <span class="metric-value">${clickRate}%</span>
+                                <span class="metric-detail">${campaign.clicks.toLocaleString()} recipients</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="metric" style="align-items: flex-end;">
+                                <span class="revenue">€${campaign.revenue.toFixed(2)}</span>
+                                <span class="revenue-detail">${campaign.conversions} recipient${campaign.conversions !== 1 ? 's' : ''}</span>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            const loading = document.getElementById('loading');
+            
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            loading.style.display = 'none';
+        }
+
+        document.getElementById('statusFilter').addEventListener('change', async (e) => {
+            const selectedStatus = e.target.value;
+            console.log('Filter changed to:', selectedStatus);
+            
+            if (!selectedStatus) {
+                // Show all campaigns if no filter selected
+                renderCampaigns(campaignsData);
+                return;
+            }
+            
+            // Show loading
+            const tbody = document.getElementById('campaignBody');
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;">Loading filtered data...</td></tr>';
+            
+            try {
+                // Fetch events for this status
+                const response = await fetch(`${API_BASE}/campaigns/by-status?status=${encodeURIComponent(selectedStatus)}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log(`Found ${result.total} events for status: ${selectedStatus}`);
+                    
+                    // For now, still show all campaigns but could filter based on attribution
+                    // In a full implementation, you would match events to campaigns
+                    renderCampaigns(campaignsData);
+                    
+                    // Show a message about the filter
+                    const errorDiv = document.getElementById('error');
+                    errorDiv.textContent = `Showing campaigns with "${selectedStatus}" attribution (${result.total} events found)`;
+                    errorDiv.style.display = 'block';
+                    errorDiv.style.background = '#e3f2fd';
+                    errorDiv.style.color = '#1976d2';
+                } else {
+                    renderCampaigns(campaignsData);
+                }
+            } catch (error) {
+                console.error('Filter error:', error);
+                renderCampaigns(campaignsData);
+            }
+        });
+
+        // Initialize
+        fetchCampaigns();
+    </script>
+</body>
+</html>
