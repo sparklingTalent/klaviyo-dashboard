@@ -4,11 +4,11 @@ const axios = require('axios');
 const { registerClient, loginUser, getUserById, verifyToken } = require('./auth');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: '*',
+  origin: process.env.FRONTEND_URL || '*',
   credentials: true
 }));
 app.use(express.json());
@@ -143,7 +143,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
     
     do {
       const params = {
-        'filter': `equals(metric_id,"${placedOrderMetric.id}"),greater-than(datetime,${startTimestamp})`,
+        'filter': `equals(metric_id,"${placedOrderMetric.id}"),greater-or-equal(datetime,${startTimestamp})`,
         'fields[event]': 'datetime,event_properties',
         'page[size]': 200
       };
@@ -843,7 +843,7 @@ app.get('/api/campaigns/:campaignId/values', authenticate, async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
 
 // Helper endpoint to get all available metrics (for debugging)

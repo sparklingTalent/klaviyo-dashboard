@@ -9,8 +9,12 @@ dist/
 # Backend
 backend/node_modules/
 backend/users.json
+backend/.env
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.production
 
