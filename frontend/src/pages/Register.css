@@ -19,7 +19,7 @@
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -27,6 +27,7 @@
   align-items: start;
   position: relative;
   z-index: 1;
+  width: 100%;
 }
 
 .register-container {
@@ -34,6 +35,8 @@
   border-radius: 20px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.3);
   padding: 40px;
+  width: 100%;
+  height: 100%;
 }
 
 .clients-container {
@@ -41,6 +44,10 @@
   border-radius: 20px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.3);
   padding: 40px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .clients-title {
