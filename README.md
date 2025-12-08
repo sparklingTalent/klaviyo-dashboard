@@ -31,13 +31,23 @@ cd backend && npm install
 cd ../frontend && npm install
 ```
 
-### 2. Configure Backend
+### 2. Authentication System
 
-Edit `backend/server.js` and update the Klaviyo API key:
+This application uses a multi-client authentication system where each client has their own Klaviyo API key.
 
-```javascript
-const KLAVIYO_API_KEY = 'your-api-key-here';
-```
+**First Time Setup:**
+1. Start the backend server
+2. Navigate to `http://localhost:5173/register.html`
+3. Register a new client with:
+   - Username
+   - Email
+   - Password
+   - Klaviyo Private API Key (starts with `pk_` or `sk_`)
+
+**Login:**
+- Navigate to `http://localhost:5173/login.html`
+- Login with your email and password
+- The dashboard will use your registered Klaviyo API key automatically
 
 ## Development
 
@@ -80,6 +90,17 @@ npm run start:backend
 ```
 
 ## API Endpoints
+
+### Authentication (No auth required)
+- `POST /api/auth/register` - Register a new client
+  - Body: `{ username, email, password, klaviyoApiKey }`
+- `POST /api/auth/login` - Login
+  - Body: `{ email, password }`
+  - Returns: `{ token, user }`
+- `GET /api/auth/me` - Get current user (requires auth)
+
+### Dashboard Endpoints (Requires authentication)
+All endpoints require `Authorization: Bearer <token>` header.
 
 - `GET /api/campaigns` - Get all campaigns with metrics
 - `GET /api/flows` - Get all flows with metrics
