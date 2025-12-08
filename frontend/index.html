@@ -550,7 +550,6 @@
         </div>
 
         <div id="error" class="error" style="display: none;"></div>
-        <div id="loading" class="loading">Loading campaigns...</div>
         
         <!-- Summary Cards -->
         <div class="summary-cards" id="summaryCards" style="display: none;">
@@ -588,6 +587,7 @@
         </div>
         
         <h2 class="table-title">Campaigns (Last 30 Days)</h2>
+        <div id="loading" class="loading">Loading campaigns...</div>
         <table id="campaignTable" style="display: none;">
             <thead>
                 <tr>
@@ -605,7 +605,7 @@
         </table>
         
         <h2 class="table-title">Flows (Last 30 Days)</h2>
-        <div id="flowsLoading" class="loading" style="display: none;">Loading flows...</div>
+        <div id="flowsLoading" class="loading">Loading flows...</div>
         <table id="flowTable" style="display: none;">
             <thead>
                 <tr>
@@ -623,9 +623,10 @@
     </div>
 
     <script>
-        // Use Vite proxy in development (automatically proxies /api to http://localhost:3000/api)
-        // In production, update this to your backend URL
-        const API_BASE = '/api';
+        // Use environment variable for API base URL in production, or proxy in development
+        // In Vercel, set VITE_API_BASE_URL to your Railway backend URL (e.g., https://your-app.railway.app)
+        // Vite will replace import.meta.env.VITE_API_BASE_URL at build time
+        const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
         
         // Authentication
         let authToken = null;
@@ -687,45 +688,6 @@
         let campaignsData = [];
         let flowsData = [];
 
-        // Sample data for testing without API
-        const SAMPLE_DATA = [
-            {
-                id: '1',
-                name: '[Follow-up] Xmas',
-                status: 'Sent',
-                sendDate: '2025-11-29T22:28:00Z',
-                messageType: 'email',
-                recipients: 191,
-                opens: 57,
-                clicks: 3,
-                revenue: 120.00,
-                conversions: 1
-            },
-            {
-                id: '2',
-                name: 'Xmas',
-                status: 'Sent',
-                sendDate: '2025-11-27T22:28:00Z',
-                messageType: 'email',
-                recipients: 1354,
-                opens: 466,
-                clicks: 15,
-                revenue: 1186.20,
-                conversions: 8
-            },
-            {
-                id: '3',
-                name: 'Baubles 2',
-                status: 'Sent',
-                sendDate: '2025-11-23T23:25:00Z',
-                messageType: 'email',
-                recipients: 1418,
-                opens: 507,
-                clicks: 32,
-                revenue: 695.00,
-                conversions: 8
-            }
-        ];
 
         async function fetchCampaigns() {
             try {
@@ -733,26 +695,20 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    campaignsData = result.data;
-                    
-                    // If no campaigns, use sample data
-                    if (campaignsData.length === 0) {
-                        console.log('No campaigns found, using sample data');
-                        campaignsData = SAMPLE_DATA;
-                    }
-                    
+                    campaignsData = result.data || [];
                     renderCampaigns(campaignsData);
                     updateSummaryCards();
                 } else {
                     showError('Failed to load campaigns: ' + (result.error || 'Unknown error'));
+                    campaignsData = [];
+                    renderCampaigns([]);
                     updateSummaryCards();
                 }
             } catch (error) {
                 console.error('API Error:', error);
-                showError('Using sample data (API error: ' + error.message + ')');
-                // Use sample data when API fails
-                campaignsData = SAMPLE_DATA;
-                renderCampaigns(campaignsData);
+                showError('Error loading campaigns: ' + error.message);
+                campaignsData = [];
+                renderCampaigns([]);
                 updateSummaryCards();
             }
         }
@@ -890,7 +846,12 @@
         async function fetchFlows() {
             try {
                 const flowsLoading = document.getElementById('flowsLoading');
+                const flowTable = document.getElementById('flowTable');
+                const flowBody = document.getElementById('flowBody');
+                
                 flowsLoading.style.display = 'block';
+                flowTable.style.display = 'table';
+                flowBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px;">Loading flows...</td></tr>';
                 
                 const response = await authenticatedFetch(`${API_BASE}/flows`);
                 const result = await response.json();
@@ -920,10 +881,13 @@
         function renderFlows(flows) {
             const tbody = document.getElementById('flowBody');
             const table = document.getElementById('flowTable');
+            const flowsLoading = document.getElementById('flowsLoading');
+            
+            flowsLoading.style.display = 'none';
+            table.style.display = 'table';
             
             if (flows.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #888;">No flows found in the last 30 days</td></tr>';
-                table.style.display = 'table';
                 return;
             }
             
@@ -1015,10 +979,7 @@
                 
                 let freshCampaignsData = [];
                 if (campaignsResult.success) {
-                    freshCampaignsData = campaignsResult.data;
-                    if (freshCampaignsData.length === 0) {
-                        freshCampaignsData = SAMPLE_DATA;
-                    }
+                    freshCampaignsData = campaignsResult.data || [];
                 } else {
                     console.warn('Failed to fetch fresh campaigns, using cached data');
                     freshCampaignsData = campaignsData;
