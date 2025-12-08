@@ -8,9 +8,19 @@ A full-stack dashboard for viewing Klaviyo campaign and flow metrics with revenu
 .
 ├── backend/          # Express.js API server
 │   ├── server.js     # Main server file
+│   ├── auth.js       # Authentication logic
 │   └── package.json  # Backend dependencies
-├── frontend/         # Vite frontend application
-│   ├── index.html    # Main HTML file
+├── frontend/         # React + Vite frontend application
+│   ├── src/
+│   │   ├── pages/    # React page components
+│   │   │   ├── Login.jsx
+│   │   │   ├── Register.jsx
+│   │   │   └── Dashboard.jsx
+│   │   ├── contexts/ # React contexts
+│   │   │   └── AuthContext.jsx
+│   │   ├── App.jsx   # Main app component
+│   │   └── main.jsx  # Entry point
+│   ├── index.html    # HTML template
 │   ├── vite.config.js # Vite configuration
 │   └── package.json  # Frontend dependencies
 └── package.json      # Root package.json with convenience scripts
@@ -37,7 +47,7 @@ This application uses a multi-client authentication system where each client has
 
 **First Time Setup:**
 1. Start the backend server
-2. Navigate to `http://localhost:5173/register.html`
+2. Navigate to `http://localhost:5173/register`
 3. Register a new client with:
    - Username
    - Email
@@ -45,7 +55,7 @@ This application uses a multi-client authentication system where each client has
    - Klaviyo Private API Key (starts with `pk_` or `sk_`)
 
 **Login:**
-- Navigate to `http://localhost:5173/login.html`
+- Navigate to `http://localhost:5173/` (root URL)
 - Login with your email and password
 - The dashboard will use your registered Klaviyo API key automatically
 
@@ -111,7 +121,7 @@ All endpoints require `Authorization: Bearer <token>` header.
 
 ## Technologies
 
-- **Backend**: Express.js, Axios
-- **Frontend**: Vite, Vanilla JavaScript
+- **Backend**: Express.js, Axios, JWT, bcrypt
+- **Frontend**: React 18, Vite, React Router
 - **API**: Klaviyo API
 

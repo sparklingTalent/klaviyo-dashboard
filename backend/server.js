@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const { registerClient, loginUser, getUserById, verifyToken } = require('./auth');
+const { registerClient, loginUser, getUserById, getAllUsers, verifyToken } = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -101,6 +101,22 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
       email: req.user.email
     }
   });
+});
+
+// Endpoint to get all registered clients (public, no auth required for registration page)
+app.get('/api/auth/clients', async (req, res) => {
+  try {
+    const clients = await getAllUsers();
+    res.json({
+      success: true,
+      data: clients
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Endpoint to get total revenue from all Placed Order events in last 30 days
@@ -221,7 +237,6 @@ function extractRevenue(props, eventId = 'unknown') {
   // Klaviyo provides revenue in $value for Placed Order events
   if (props['$value'] !== undefined && props['$value'] !== null) {
     const revenue = Number(props['$value']);
-    console.log(`[Revenue] Event ${eventId}: Found $value = ${revenue}`);
     return revenue;
   }
 
@@ -232,7 +247,6 @@ function extractRevenue(props, eventId = 'unknown') {
     if (props[field] !== undefined && props[field] !== null) {
       const numValue = Number(props[field]);
       if (!isNaN(numValue) && numValue > 0) {
-        console.log(`[Revenue] Event ${eventId}: Found ${field} = ${numValue}`);
         return numValue;
       }
     }
@@ -292,9 +306,18 @@ app.get('/api/campaigns', authenticate, async (req, res) => {
 
     const emailCampaigns = emailResponse.data.data || [];
     const smsCampaigns = smsResponse.data.data || [];
-    const campaigns = [...emailCampaigns, ...smsCampaigns];
+    
+    // Remove duplicates by campaign ID
+    const allCampaigns = [...emailCampaigns, ...smsCampaigns];
+    const uniqueCampaignsMap = new Map();
+    allCampaigns.forEach(campaign => {
+      if (!uniqueCampaignsMap.has(campaign.id)) {
+        uniqueCampaignsMap.set(campaign.id, campaign);
+      }
+    });
+    const campaigns = Array.from(uniqueCampaignsMap.values());
 
-    console.log(`Found ${emailCampaigns.length} email campaigns and ${smsCampaigns.length} SMS campaigns`);
+    console.log(`Found ${emailCampaigns.length} email campaigns and ${smsCampaigns.length} SMS campaigns (${campaigns.length} unique)`);
 
     // Get Placed Order metric ID
     let placedOrderMetricId = null;
@@ -325,9 +348,18 @@ app.get('/api/campaigns', authenticate, async (req, res) => {
     
     // Fetch metrics for each campaign
     const campaignsWithMetrics = [];
+    const processedCampaignIds = new Set(); // Track processed campaigns to prevent duplicates
     
     for (let i = 0; i < campaigns.length; i++) {
       const campaign = campaigns[i];
+      
+      // Skip if already processed (prevent duplicate processing)
+      if (processedCampaignIds.has(campaign.id)) {
+        console.log(`Skipping duplicate campaign: ${campaign.id}`);
+        continue;
+      }
+      processedCampaignIds.add(campaign.id);
+      
       const attributes = campaign.attributes;
       
       // Determine message type from campaign data
@@ -717,10 +749,6 @@ app.get('/api/campaigns/by-status', authenticate, async (req, res) => {
       // Extract revenue
       const revenue = extractRevenue(eventProps, event.id);
       
-      if (revenue > 0 && campaignId) {
-        console.log(`[Revenue] Event ${event.id}: Revenue = ${revenue}, Campaign = ${campaignId}`);
-      }
-      
       return {
         id: event.id,
         type: event.type,
@@ -1019,10 +1047,6 @@ app.get('/api/flows/by-status', authenticate, async (req, res) => {
       
       // Extract revenue
       const revenue = extractRevenue(eventProps, event.id);
-      
-      if (revenue > 0 && flowId) {
-        console.log(`[Revenue] Event ${event.id}: Revenue = ${revenue}, Flow = ${flowId}`);
-      }
       
       return {
         id: event.id,
