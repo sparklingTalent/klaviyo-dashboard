@@ -2,7 +2,18 @@ import { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext(null);
 
-const API_BASE = window.__API_BASE__ || '/api';
+// Ensure API_BASE always includes /api
+let apiBase = window.__API_BASE__ || '/api';
+// If it's a full URL (starts with http) and doesn't end with /api, append it
+if (apiBase.startsWith('http')) {
+  // Remove trailing slash if present
+  apiBase = apiBase.replace(/\/$/, '');
+  // Append /api if not already present
+  if (!apiBase.endsWith('/api')) {
+    apiBase = `${apiBase}/api`;
+  }
+}
+const API_BASE = apiBase;
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(localStorage.getItem('token'));
