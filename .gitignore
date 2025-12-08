@@ -8,6 +8,7 @@ dist/
 
 # Backend
 backend/node_modules/
+backend/users.json
 
 # Frontend
 frontend/node_modules/

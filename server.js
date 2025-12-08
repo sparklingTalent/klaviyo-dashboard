@@ -1,206 +1,23 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const { registerClient, loginUser, getUserById, verifyToken } = require('./auth');
 
 const app = express();
 const PORT = 3000;
 
 // Middleware
-app.use(cors({
-  origin: '*',
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 
+// Klaviyo API Configuration
+const KLAVIYO_API_KEY = 'pk_7162d583f46b0209cc4c90be84a5364e5b';
 const KLAVIYO_BASE_URL = 'https://a.klaviyo.com/api';
 
-// Authentication middleware
-async function authenticate(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, error: 'No token provided' });
-    }
-    
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded) {
-      return res.status(401).json({ success: false, error: 'Invalid token' });
-    }
-    
-    const user = await getUserById(decoded.id);
-    if (!user) {
-      return res.status(401).json({ success: false, error: 'User not found' });
-    }
-    
-    req.user = user;
-    next();
-  } catch (error) {
-    res.status(401).json({ success: false, error: 'Authentication failed' });
-  }
-}
-
-// Auth Routes
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { username, email, password, klaviyoApiKey } = req.body;
-    
-    if (!username || !email || !password || !klaviyoApiKey) {
-      return res.status(400).json({
-        success: false,
-        error: 'All fields are required'
-      });
-    }
-    
-    const user = await registerClient(username, email, password, klaviyoApiKey);
-    res.json({
-      success: true,
-      message: 'Client registered successfully',
-      user
-    });
-  } catch (error) {
-    res.status(400).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email and password are required'
-      });
-    }
-    
-    const result = await loginUser(email, password);
-    res.json({
-      success: true,
-      ...result
-    });
-  } catch (error) {
-    res.status(401).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.get('/api/auth/me', authenticate, async (req, res) => {
-  res.json({
-    success: true,
-    user: {
-      id: req.user.id,
-      username: req.user.username,
-      email: req.user.email
-    }
-  });
-});
-
-// Endpoint to get total revenue from all Placed Order events in last 30 days
-app.get('/api/revenue/total', authenticate, async (req, res) => {
-  try {
-    const userApiKey = getUserApiKey(req);
-    const { start } = getLast30Days();
-    const startTimestamp = new Date(start).toISOString();
-    
-    console.log('Fetching total revenue from Placed Order events...');
-    
-    // Get Placed Order metric ID
-    const metricsResponse = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
-      headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-        'revision': '2024-10-15',
-        'Accept': 'application/json'
-      }
-    });
-    
-    const metrics = metricsResponse.data?.data || [];
-    const placedOrderMetric = metrics.find(m => 
-      m.attributes?.name === 'Placed Order' ||
-      m.attributes?.name === 'placed-order'
-    );
-    
-    if (!placedOrderMetric) {
-      return res.json({
-        success: false,
-        error: 'Placed Order metric not found'
-      });
-    }
-    
-    console.log(`Using Placed Order metric ID: ${placedOrderMetric.id}`);
-    
-    // Fetch all Placed Order events with pagination
-    let totalRevenue = 0;
-    let nextCursor = null;
-    let totalEvents = 0;
-    
-    do {
-      const params = {
-        'filter': `equals(metric_id,"${placedOrderMetric.id}"),greater-than(datetime,${startTimestamp})`,
-        'fields[event]': 'datetime,event_properties',
-        'page[size]': 200
-      };
-      
-      if (nextCursor) {
-        params['page[cursor]'] = nextCursor;
-      }
-      
-      const response = await axios.get(`${KLAVIYO_BASE_URL}/events/`, {
-        headers: {
-          'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-          'revision': '2024-10-15',
-          'Accept': 'application/json'
-        },
-        params
-      });
-      
-      const events = response.data.data || [];
-      const links = response.data.links || {};
-      
-      // Sum up revenue from all events
-      events.forEach(event => {
-        const eventProps = event.attributes?.event_properties || {};
-        const revenue = extractRevenue(eventProps, event.id);
-        totalRevenue += revenue;
-        if (revenue > 0) {
-          totalEvents++;
-        }
-      });
-      
-      // Get next page cursor
-      nextCursor = links.next ? new URL(links.next).searchParams.get('page[cursor]') : null;
-      
-      console.log(`Processed ${events.length} events, total revenue so far: ${totalRevenue.toFixed(2)}`);
-      
-    } while (nextCursor);
-    
-    console.log(`Total revenue from ${totalEvents} Placed Order events: ${totalRevenue.toFixed(2)}`);
-    
-    res.json({
-      success: true,
-      totalRevenue: totalRevenue,
-      totalEvents: totalEvents,
-      timeframe: 'Last 30 days'
-    });
-  } catch (error) {
-    console.error('Error fetching total revenue:', error.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      error: error.response?.data?.errors || error.message
-    });
-  }
-});
-
-// Helper function to check if API key is public
-function isPublicKey(apiKey) {
-  return apiKey && apiKey.startsWith('pk_');
+// Check if using public key (limited permissions)
+const isPublicKey = KLAVIYO_API_KEY.startsWith('pk_');
+if (isPublicKey) {
+  console.warn('⚠️  WARNING: Using public API key. Metrics and reporting may not be available.');
+  console.warn('⚠️  For full functionality, use a Private API Key (starts with "sk_")');
 }
 
 // Helper function to get date 30 days ago
@@ -241,25 +58,18 @@ function extractRevenue(props, eventId = 'unknown') {
   return 0;
 }
 
-// Helper function to get user's Klaviyo API key
-function getUserApiKey(req) {
-  return req.user.klaviyoApiKey;
-}
-
 // Endpoint to fetch campaigns
-app.get('/api/campaigns', authenticate, async (req, res) => {
+app.get('/api/campaigns', async (req, res) => {
   try {
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
     
     console.log('Fetching campaigns created after:', startTimestamp);
     
-    const userApiKey = getUserApiKey(req);
-    
     // Fetch email campaigns from Klaviyo
     const emailResponse = await axios.get(`${KLAVIYO_BASE_URL}/campaigns/`, {
       headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
       },
@@ -275,7 +85,7 @@ app.get('/api/campaigns', authenticate, async (req, res) => {
     try {
       smsResponse = await axios.get(`${KLAVIYO_BASE_URL}/campaigns/`, {
         headers: {
-          'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+          'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
           'revision': '2024-10-15',
           'Accept': 'application/json'
         },
@@ -301,7 +111,7 @@ app.get('/api/campaigns', authenticate, async (req, res) => {
     try {
       const metricsListResponse = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
         headers: {
-          'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+          'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
           'revision': '2024-10-15',
           'Accept': 'application/json'
         }
@@ -384,7 +194,7 @@ app.get('/api/campaigns', authenticate, async (req, res) => {
               },
               {
                 headers: {
-                  'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+                  'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
                   'revision': '2024-10-15',
                   'Accept': 'application/json',
                   'Content-Type': 'application/json'
@@ -452,15 +262,14 @@ app.get('/api/campaigns', authenticate, async (req, res) => {
 });
 
 // Endpoint to fetch flows with metrics
-app.get('/api/flows', authenticate, async (req, res) => {
+app.get('/api/flows', async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
     console.log('Fetching all flows...');
     
     // Fetch all flows from Klaviyo
     const response = await axios.get(`${KLAVIYO_BASE_URL}/flows/`, {
       headers: {
-        "Authorization": `Klaviyo-API-Key ${userApiKey}`,
+        "Authorization": `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         "revision": "2024-10-15",
         "Accept": "application/json"
       }
@@ -483,7 +292,7 @@ app.get('/api/flows', authenticate, async (req, res) => {
     try {
       const metricsResponse = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
         headers: {
-          'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+          'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
           'revision': '2024-10-15',
           'Accept': 'application/json'
         }
@@ -548,7 +357,7 @@ app.get('/api/flows', authenticate, async (req, res) => {
           },
           {
             headers: {
-              'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+              'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
               'revision': '2024-10-15',
               'Accept': 'application/json',
               'Content-Type': 'application/json'
@@ -623,9 +432,8 @@ app.get('/api/flows', authenticate, async (req, res) => {
 });
 
 // Endpoint to fetch Placed Order events by campaign
-app.get('/api/campaigns/by-status', authenticate, async (req, res) => {
+app.get('/api/campaigns/by-status', async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
     const { status } = req.query;
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
@@ -643,7 +451,7 @@ app.get('/api/campaigns/by-status', authenticate, async (req, res) => {
     // Get Placed Order metric ID
     const metricsResponse = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
       headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
       }
@@ -667,7 +475,7 @@ app.get('/api/campaigns/by-status', authenticate, async (req, res) => {
     // Fetch Placed Order events
     const response = await axios.get(`${KLAVIYO_BASE_URL}/events/`, {
       headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
       },
@@ -780,9 +588,8 @@ app.get('/api/campaigns/by-status', authenticate, async (req, res) => {
 });
 
 // Endpoint to fetch campaign values/metrics (aggregate data)
-app.get('/api/campaigns/:campaignId/values', authenticate, async (req, res) => {
+app.get('/api/campaigns/:campaignId/values', async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
     const { campaignId } = req.params;
     
     console.log(`Fetching values for campaign: ${campaignId}`);
@@ -820,7 +627,7 @@ app.get('/api/campaigns/:campaignId/values', authenticate, async (req, res) => {
       },
       {
         headers: {
-          'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+          'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
           'revision': '2024-10-15',
           'Accept': 'application/json',
           'Content-Type': 'application/json'
@@ -847,12 +654,11 @@ app.listen(PORT, () => {
 });
 
 // Helper endpoint to get all available metrics (for debugging)
-app.get('/api/metrics', authenticate, async (req, res) => {
+app.get('/api/metrics', async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
     const response = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
       headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
       }
@@ -872,9 +678,8 @@ app.get('/api/metrics', authenticate, async (req, res) => {
 });
 
 // Endpoint to fetch attribution data for a campaign
-app.get('/api/campaigns/:campaignId/attribution', authenticate, async (req, res) => {
+app.get('/api/campaigns/:campaignId/attribution', async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
     const { campaignId } = req.params;
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
@@ -884,7 +689,7 @@ app.get('/api/campaigns/:campaignId/attribution', authenticate, async (req, res)
     // Get Placed Order events attributed to this campaign
     const response = await axios.get(`${KLAVIYO_BASE_URL}/events/`, {
       headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
       },
@@ -926,9 +731,8 @@ app.get('/api/campaigns/:campaignId/attribution', authenticate, async (req, res)
 });
 
 // Endpoint to fetch Placed Order events by flow
-app.get('/api/flows/by-status', authenticate, async (req, res) => {
+app.get('/api/flows/by-status', async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
     const { status } = req.query;
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
@@ -946,7 +750,7 @@ app.get('/api/flows/by-status', authenticate, async (req, res) => {
     // Get Placed Order metric ID
     const metricsResponse = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
       headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
       }
@@ -970,7 +774,7 @@ app.get('/api/flows/by-status', authenticate, async (req, res) => {
     // Fetch Placed Order events
     const response = await axios.get(`${KLAVIYO_BASE_URL}/events/`, {
       headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
       },
@@ -1063,9 +867,8 @@ app.get('/api/flows/by-status', authenticate, async (req, res) => {
 });
 
 // Endpoint to fetch attribution data for a flow
-app.get('/api/flows/:flowId/attribution', authenticate, async (req, res) => {
+app.get('/api/flows/:flowId/attribution', async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
     const { flowId } = req.params;
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
@@ -1075,7 +878,7 @@ app.get('/api/flows/:flowId/attribution', authenticate, async (req, res) => {
     // Get Placed Order metric ID
     const metricsResponse = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
       headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
       }
@@ -1097,7 +900,7 @@ app.get('/api/flows/:flowId/attribution', authenticate, async (req, res) => {
     // Get Placed Order events attributed to this flow
     const response = await axios.get(`${KLAVIYO_BASE_URL}/events/`, {
       headers: {
-        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
       },
