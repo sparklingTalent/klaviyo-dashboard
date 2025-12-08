@@ -110,6 +110,17 @@ async function getUserById(userId) {
   };
 }
 
+// Get all users (without sensitive data)
+async function getAllUsers() {
+  const users = await loadUsers();
+  return users.map(user => ({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    createdAt: user.createdAt
+  }));
+}
+
 // Verify JWT token
 function verifyToken(token) {
   try {
@@ -123,6 +134,7 @@ module.exports = {
   registerClient,
   loginUser,
   getUserById,
+  getAllUsers,
   verifyToken
 };
 
