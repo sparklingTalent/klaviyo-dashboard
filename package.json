@@ -1,18 +1,16 @@
 {
-    "name": "klaviyo-campaign-dashboard",
-    "version": "1.0.0",
-    "description": "Klaviyo Campaign Attribution Dashboard",
-    "main": "server.js",
-    "scripts": {
-      "start": "node server.js",
-      "dev": "nodemon server.js"
-    },
-    "dependencies": {
-      "express": "^4.18.2",
-      "cors": "^2.8.5",
-      "axios": "^1.6.0"
-    },
-    "devDependencies": {
-      "nodemon": "^3.0.1"
-    }
+  "name": "klaviyo-dashboard",
+  "version": "1.0.0",
+  "description": "Klaviyo Campaign & Flow Dashboard - Full Stack Application",
+  "scripts": {
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build": "cd frontend && npm run build",
+    "start:backend": "cd backend && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
   }
+}
