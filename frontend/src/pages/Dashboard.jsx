@@ -31,152 +31,60 @@ function Dashboard() {
     
     hasFetchedRef.current = true;
     
-    // Sequential fetching: campaigns -> wait 30s -> flows -> summary
+    // Fetch all data from single endpoint
     const loadData = async () => {
       try {
-        await new Promise(resolve => setTimeout(resolve, 30000));
-        // 1. Fetch campaigns
-        const campaignsResult = await fetchCampaigns();
+        setLoading(prev => ({ ...prev, campaigns: true, flows: true, summary: true }));
         
-        // Update summary with campaigns data immediately
-        if (campaignsResult) {
-          await updateSummaryCards(campaignsResult, []);
+        const response = await authenticatedFetch(`${API_BASE}/revenue/total`);
+        const result = await response.json();
+        
+        if (result.success) {
+          // Set campaigns and flows from the response
+          setCampaigns(result.campaigns || []);
+          setFlows(result.flows || []);
+          
+          // Calculate campaign and flow table revenue
+          const campaignTableRevenue = (result.campaigns || []).reduce((sum, campaign) => {
+            return sum + (campaign.revenue || 0);
+          }, 0);
+          
+          const flowTableRevenue = (result.flows || []).reduce((sum, flow) => {
+            return sum + (flow.revenue || 0);
+          }, 0);
+          
+          // Calculate percentages
+          const totalRevenue = result.totalRevenue || 0;
+          const campaignPercentage = totalRevenue > 0 
+            ? ((campaignTableRevenue / totalRevenue) * 100).toFixed(1)
+            : '0.0';
+          const flowPercentage = totalRevenue > 0 
+            ? ((flowTableRevenue / totalRevenue) * 100).toFixed(1)
+            : '0.0';
+          
+          // Set summary
+          setSummary({
+            totalRevenue: totalRevenue,
+            campaignRevenue: campaignTableRevenue,
+            flowRevenue: flowTableRevenue,
+            campaignCount: result.totalCampaigns || 0,
+            flowCount: result.totalFlows || 0,
+            campaignPercentage,
+            flowPercentage
+          });
+        } else {
+          setError('Failed to load data: ' + (result.error || 'Unknown error'));
         }
-        
-        // 2. Wait 30 seconds
-        await new Promise(resolve => setTimeout(resolve, 30000));
-        
-        // 3. Fetch flows
-        const flowsResult = await fetchFlows();
-        
-        // 4. Update summary again with both campaigns and flows
-        // Pass both results explicitly to ensure we use fresh data
-        await new Promise(resolve => setTimeout(resolve, 100));
-        await updateSummaryCards(campaignsResult, flowsResult);
       } catch (error) {
-        console.error('Error in loadData:', error);
+        console.error('Error loading data:', error);
+        setError('Error loading data: ' + error.message);
+      } finally {
+        setLoading(prev => ({ ...prev, campaigns: false, flows: false, summary: false }));
       }
     };
     
     loadData();
   }, []);
-
-  const fetchCampaigns = async () => {
-    try {
-      setLoading(prev => ({ ...prev, campaigns: true }));
-      const response = await authenticatedFetch(`${API_BASE}/campaigns`);
-      const result = await response.json();
-      
-      if (result.success) {
-        const campaignsData = result.data || [];
-        setCampaigns(campaignsData);
-        return campaignsData; // Return data for immediate use
-      } else {
-        setError('Failed to load campaigns: ' + (result.error || 'Unknown error'));
-        setCampaigns([]);
-        return [];
-      }
-    } catch (error) {
-      console.error('API Error:', error);
-      setError('Error loading campaigns: ' + error.message);
-      setCampaigns([]);
-      return [];
-    } finally {
-      setLoading(prev => ({ ...prev, campaigns: false }));
-    }
-  };
-
-  const fetchFlows = async () => {
-    try {
-      setLoading(prev => ({ ...prev, flows: true }));
-      const response = await authenticatedFetch(`${API_BASE}/flows`);
-      const result = await response.json();
-      
-      if (result.success) {
-        const flowsData = result.data || [];
-        setFlows(flowsData);
-        return flowsData; // Return data for immediate use
-      } else {
-        console.error('Failed to load flows:', result.error);
-        setFlows([]);
-        return [];
-      }
-    } catch (error) {
-      console.error('Error fetching flows:', error);
-      setFlows([]);
-      return [];
-    } finally {
-      setLoading(prev => ({ ...prev, flows: false }));
-    }
-  };
-
-  const updateSummaryCards = async (campaignsData = null, flowsData = null) => {
-    // Use provided data or current state
-    const currentCampaigns = campaignsData !== null ? campaignsData : campaigns;
-    const currentFlows = flowsData !== null ? flowsData : flows;
-    
-    const campaignTableRevenue = currentCampaigns.reduce((sum, campaign) => {
-      return sum + (campaign.revenue || 0);
-    }, 0);
-    
-    const flowTableRevenue = currentFlows.reduce((sum, flow) => {
-      return sum + (flow.revenue || 0);
-    }, 0);
-    
-    // Fetch total revenue from all Placed Order events
-    try {
-      setLoading(prev => ({ ...prev, summary: true }));
-      const response = await authenticatedFetch(`${API_BASE}/revenue/total`);
-      const result = await response.json();
-      
-      let totalRevenue = 0;
-      if (result.success) {
-        totalRevenue = result.totalRevenue;
-      } else {
-        // Fallback to calculating from campaigns and flows
-        totalRevenue = campaignTableRevenue + flowTableRevenue;
-      }
-
-      const campaignPercentage = totalRevenue > 0 
-        ? ((campaignTableRevenue / totalRevenue) * 100).toFixed(1)
-        : '0.0';
-      const flowPercentage = totalRevenue > 0 
-        ? ((flowTableRevenue / totalRevenue) * 100).toFixed(1)
-        : '0.0';
-
-      setSummary({
-        totalRevenue,
-        campaignRevenue: campaignTableRevenue,
-        flowRevenue: flowTableRevenue,
-        campaignCount: currentCampaigns.length,
-        flowCount: currentFlows.length,
-        campaignPercentage,
-        flowPercentage
-      });
-    } catch (error) {
-      console.error('Error fetching total revenue:', error);
-      // Fallback to calculating from campaigns and flows
-      const totalRevenue = campaignTableRevenue + flowTableRevenue;
-      const campaignPercentage = totalRevenue > 0 
-        ? ((campaignTableRevenue / totalRevenue) * 100).toFixed(1)
-        : '0.0';
-      const flowPercentage = totalRevenue > 0 
-        ? ((flowTableRevenue / totalRevenue) * 100).toFixed(1)
-        : '0.0';
-      
-      setSummary({
-        totalRevenue,
-        campaignRevenue: campaignTableRevenue,
-        flowRevenue: flowTableRevenue,
-        campaignCount: currentCampaigns.length,
-        flowCount: currentFlows.length,
-        campaignPercentage,
-        flowPercentage
-      });
-    } finally {
-      setLoading(prev => ({ ...prev, summary: false }));
-    }
-  };
 
   return (
     <div className="dashboard-container">
