@@ -119,6 +119,9 @@ app.get('/api/auth/clients', async (req, res) => {
   }
 });
 
+// Helper function to add 0.1s delay between API calls
+const delay = (ms = 100) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Endpoint to get total revenue from all Placed Order events in last 30 days
 app.get('/api/revenue/total', authenticate, async (req, res) => {
   try {
@@ -212,6 +215,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
         }
       }
     );
+    await delay(); // 0.1s delay
     
     // Extract total revenue using the proper response structure
     // Response structure: response.data.attributes.data (array of groups)
@@ -258,6 +262,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
           }
         }
       );
+      await delay(); // 0.1s delay
       
       // Find Opened Email metric
       const openedMetric = metricsResponse.data.data.find(
@@ -320,6 +325,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
           }
         }
       );
+      await delay(); // 0.1s delay
       
       // Extract grouped flow revenue and count recipients (non-zero sum_value entries)
       console.log(`Flow Revenue Response: ${JSON.stringify(flowRevenueAggregateResponse.data, null, 2)}`);
@@ -384,6 +390,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
           }
         }
       );
+      await delay(); // 0.1s delay
       
       // Extract flow conversions count
       if (flowConversionsAggregateResponse.data?.data?.attributes?.data) {
@@ -449,7 +456,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
           'sort': '-updated_at'
         }
       });
-      
+      await delay(); // 0.1s delay
       
       // Fetch SMS campaigns (channel filter is required by API, filter for active status)
       let smsResponse;
@@ -586,6 +593,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
               }
             }
           );
+          await delay(); // 0.1s delay
           
           // Store opens per message ID
           if (opensResponse.data?.data?.attributes?.data) {
@@ -640,6 +648,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
               }
             }
           );
+          await delay(); // 0.1s delay
           
           // Store clicks per message ID
           if (clicksResponse.data?.data?.attributes?.data) {
@@ -694,6 +703,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
               }
             }
           );
+          await delay(); // 0.1s delay
           
           // Store recipients per message ID
           if (recipientsResponse.data?.data?.attributes?.data) {
@@ -773,6 +783,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
               }
             }
           );
+          await delay(); // 0.1s delay
           
           // Extract revenue for this campaign with dimension validation
           let campaignRevenue = 0;
@@ -840,6 +851,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
               }
             }
           );
+          await delay(); // 0.1s delay
           
           // Extract conversions count for this campaign
           let campaignConversions = 0;
@@ -932,6 +944,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
           'sort': '-updated_at'
         }
       });
+      await delay(); // 0.1s delay
       
       // Fetch SMS campaigns (channel filter is required by API)
       let smsResponse;
@@ -1048,6 +1061,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
           "Accept": "application/json"
         }
       });
+      await delay(); // 0.1s delay
       
       const allFlows = flowsResponse.data.data || [];
       
@@ -1094,6 +1108,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
               }
             }
           );
+          await delay(); // 0.1s delay
           
           // Sum the count arrays for each flow
           if (flowOpensResponse.data?.data?.attributes?.data) {
@@ -1156,6 +1171,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
               }
             }
           );
+          await delay(); // 0.1s delay
           
           // Sum the count arrays for each flow
           if (flowClicksResponse.data?.data?.attributes?.data) {
@@ -1217,6 +1233,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
               }
             }
           );
+          await delay(); // 0.1s delay
           
           // Sum the count arrays for each flow
           if (flowRecipientsResponse.data?.data?.attributes?.data) {
