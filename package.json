@@ -1,16 +1,16 @@
 {
   "name": "klaviyo-dashboard",
-  "version": "1.0.0",
+    "version": "1.0.0",
   "description": "Klaviyo Campaign & Flow Dashboard - Full Stack Application",
-  "scripts": {
+    "scripts": {
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "build": "cd frontend && npm run build",
     "start:backend": "cd backend && npm start"
-  },
-  "devDependencies": {
+    },
+    "devDependencies": {
     "concurrently": "^8.2.2"
+    }
   }
-}
