@@ -122,12 +122,48 @@ app.get('/api/auth/clients', async (req, res) => {
 // Helper function to add 0.1s delay between API calls
 const delay = (ms = 100) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper function to fetch account timezone from Klaviyo
+async function getKlaviyoAccountTimezone(userApiKey) {
+  try {
+    const accountsResponse = await axios.get(`${KLAVIYO_BASE_URL}/accounts/`, {
+      headers: {
+        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'revision': '2024-10-15',
+        'Accept': 'application/json'
+      }
+    });
+    
+    // Extract timezone from account data
+    const accountData = accountsResponse.data?.data;
+    if (accountData && accountData.length > 0) {
+      const timezone = accountData[0]?.attributes?.timezone;
+      if (timezone) {
+        console.log(`Fetched Klaviyo account timezone: ${timezone}`);
+        return timezone;
+      }
+    }
+    
+    // Fallback to UTC if timezone not found
+    return 'UTC';
+  } catch (error) {
+    console.log(`Error fetching account timezone: ${error.response?.data || error.message}, using default: UTC`);
+    // Fallback to UTC if API call fails
+    return 'UTC';
+  }
+}
+
 // Endpoint to get total revenue from all Placed Order events in last 30 days
 app.get('/api/revenue/total', authenticate, async (req, res) => {
   try {
     const userApiKey = getUserApiKey(req);
-    const { start, end } = getLast30Days();
     
+    // Fetch account timezone from Klaviyo
+    const accountTimezone = await getKlaviyoAccountTimezone(userApiKey);
+    await delay(); // 0.1s delay
+    
+    const { start, end } = getLast30Days(accountTimezone);
+    
+    console.log(`Using account timezone: ${accountTimezone}`);
     console.log('Fetching total revenue, campaigns, and flows using metric-aggregates API...');
     
     // Get all metrics
@@ -202,7 +238,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             metric_id: placedOrderMetricId,
             measurements: ['sum_value'],
             filter: filterString,
-            timezone: 'UTC'
+            timezone: accountTimezone
           }
         }
       },
@@ -312,7 +348,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
                 ...processedFilters,
                 `not(equals($attributed_flow,""))`
               ],
-              timezone: 'UTC'
+              timezone: accountTimezone
             }
           }
         },
@@ -377,7 +413,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
                 ...processedFilters,
                 `not(equals($attributed_flow,""))`
               ],
-              timezone: 'UTC'
+              timezone: accountTimezone
             }
           }
         },
@@ -438,7 +474,8 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
     
     try {
       // First, fetch campaigns to get message IDs
-      const { start, end } = getLast30Days();
+      // Use the account timezone that was fetched earlier
+      const { start, end } = getLast30Days(accountTimezone);
       const startTimestamp = new Date(start).toISOString();
       const endTimestamp = new Date(end).toISOString();
       
@@ -576,7 +613,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
                 measurements: ['count'],
                 by: ['$message'],
                 filter: processedFilters, // Only date filters, NO campaign filter
-                timezone: 'UTC'
+                timezone: accountTimezone
               }
             }
           };
@@ -631,7 +668,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
                 measurements: ['count'],
                 by: ['$message'],
                 filter: processedFilters, // Only date filters, NO campaign filter
-                timezone: 'UTC'
+                timezone: accountTimezone
               }
             }
           };
@@ -686,7 +723,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
                 measurements: ['count'],
                 by: ['$message'],
                 filter: processedFilters, // Only date filters, NO campaign filter
-                timezone: 'UTC'
+                timezone: accountTimezone
               }
             }
           };
@@ -765,7 +802,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
               measurements: ['sum_value'],
               by: ['$attributed_message'], // IMPORTANT: Revenue attribution uses $attributed_message
               filter: [...processedFilters, `equals($attributed_message,"${campaignId}")`],
-              timezone: 'UTC'
+              timezone: accountTimezone
             }
           }
         };
@@ -834,7 +871,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
                   ...processedFilters,
                   `equals($attributed_message,"${campaignId}")`
                 ],
-                timezone: 'UTC'
+                timezone: accountTimezone
               }
             }
           };
@@ -1091,7 +1128,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
                   ...processedFilters,
                   `not(equals($flow,""))`
                 ],
-                timezone: 'UTC'
+                timezone: accountTimezone
               }
             }
           };
@@ -1154,7 +1191,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
                   ...processedFilters,
                   `not(equals($flow,""))`
                 ],
-                timezone: 'UTC'
+                timezone: accountTimezone
               }
             }
           };
@@ -1216,7 +1253,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
                   ...processedFilters,
                   `not(equals($flow,""))`
                 ],
-                timezone: 'UTC'
+                timezone: accountTimezone
               }
             }
           };
@@ -1338,13 +1375,40 @@ function isPublicKey(apiKey) {
 }
 
 // Helper function to get date 30 days ago
-function getLast30Days() {
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 31);
+function getLast30Days(timezone = 'UTC') {
+  // Get current date in specified timezone (default: UTC)
+  const now = new Date();
+  
+  // Convert to specified timezone
+  // Get time in the specified timezone by using toLocaleString
+  const timezoneTimeString = now.toLocaleString('en-US', { timeZone: timezone });
+  const timezoneDate = new Date(timezoneTimeString);
+  
+  // Calculate offset between UTC and timezone time
+  const utcTime = now.getTime();
+  const timezoneTime = new Date(timezoneTimeString).getTime();
+  const offset = timezoneTime - utcTime;
+  
+  // Create dates in the specified timezone
+  const endDate = new Date(now.getTime() + offset);
+  const startDate = new Date(now.getTime() + offset);
+  startDate.setDate(startDate.getDate() - 30);
+  
+  // Set time to 00:00:00.000 for both dates in the specified timezone
+  startDate.setHours(0, 0, 0, 0);
+  endDate.setHours(0, 0, 0, 0);
+  
+  // Set end date to start of next day to cover the full last day
+  endDate.setDate(endDate.getDate() + 1);
+  
+  // Convert timezone dates back to UTC for ISO string format
+  // Since we added offset to get timezone time, we subtract it to get back to UTC
+  const startUTC = new Date(startDate.getTime() - offset);
+  const endUTC = new Date(endDate.getTime() - offset);
+  
   return {
-    start: startDate.toISOString(),
-    end: endDate.toISOString()
+    start: startUTC.toISOString(),
+    end: endUTC.toISOString()
   };
 }
 
