@@ -216,6 +216,9 @@ function Dashboard() {
         const result = await response.json();
         
         if (result.success) {
+
+          // Set currency
+          setCurrency(result.currency || 'USD');
           // Filter campaigns: only show "Sent" status
           const sentCampaigns = (result.campaigns || []).filter(campaign => {
             const status = campaign.status || '';
@@ -249,9 +252,6 @@ function Dashboard() {
           const flowPercentage = totalRevenue > 0 
             ? ((flowTableRevenue / totalRevenue) * 100).toFixed(1)
             : '0.0';
-          
-          // Set currency
-          setCurrency(result.currency || 'USD');
           
           // Set summary (with percentages)
           setSummary({
