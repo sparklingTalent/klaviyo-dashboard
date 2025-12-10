@@ -27,7 +27,7 @@ async function saveUsers(users) {
 }
 
 // Register a new client
-async function registerClient(username, email, password, klaviyoApiKey, accountName = null) {
+async function registerClient(username, email, password, klaviyoApiKey = null, accountName = null) {
   const users = await loadUsers();
   
   // Check if user already exists
@@ -43,22 +43,20 @@ async function registerClient(username, email, password, klaviyoApiKey, accountN
   const hashedPassword = await bcrypt.hash(password, 10);
   
   // Create new user with klaviyoAccounts array
-  // If accountName is provided, use it; otherwise generate a default name
-  const defaultAccountName = accountName || 'Default Account';
+  // Only add account if API key is provided
   const newUser = {
     id: Date.now().toString(),
     username,
     email,
     password: hashedPassword,
-    // Support both old format (klaviyoApiKey) and new format (klaviyoAccounts)
-    klaviyoApiKey, // Keep for backward compatibility
-    klaviyoAccounts: [{
+    klaviyoApiKey: klaviyoApiKey || null, // Keep for backward compatibility
+    klaviyoAccounts: klaviyoApiKey ? [{
       id: Date.now().toString(),
-      name: defaultAccountName,
+      name: accountName || 'Default Account',
       apiKey: klaviyoApiKey,
       isActive: true,
       createdAt: new Date().toISOString()
-    }],
+    }] : [], // Empty array if no API key provided
     createdAt: new Date().toISOString()
   };
   

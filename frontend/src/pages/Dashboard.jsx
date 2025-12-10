@@ -2,6 +2,122 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import './Dashboard.css';
 
+// Helper function to format currency
+function formatCurrency(amount, currency = 'USD') {
+  const currencySymbols = {
+    'USD': '$',
+    'GBP': '£',
+    'EUR': '€',
+    'AED': 'AED ',
+    'AUD': 'A$',
+    'CAD': 'C$',
+    'JPY': '¥',
+    'CHF': 'CHF ',
+    'CNY': '¥',
+    'INR': '₹',
+    'SGD': 'S$',
+    'HKD': 'HK$',
+    'NZD': 'NZ$',
+    'MXN': 'MX$',
+    'BRL': 'R$',
+    'ZAR': 'R',
+    'SEK': 'kr',
+    'NOK': 'kr',
+    'DKK': 'kr',
+    'PLN': 'zł',
+    'CZK': 'Kč',
+    'HUF': 'Ft',
+    'RUB': '₽',
+    'TRY': '₺',
+    'ILS': '₪',
+    'SAR': 'SR',
+    'THB': '฿',
+    'MYR': 'RM',
+    'PHP': '₱',
+    'IDR': 'Rp',
+    'KRW': '₩',
+    'VND': '₫',
+    'TWD': 'NT$',
+    'CLP': 'CLP$',
+    'ARS': '$',
+    'COP': 'COL$',
+    'PEN': 'S/',
+    'EGP': 'E£',
+    'NGN': '₦',
+    'KES': 'KSh',
+    'PKR': '₨',
+    'BDT': '৳',
+    'LKR': 'Rs',
+    'NPR': 'Rs',
+    'MMK': 'K',
+    'KHR': '៛',
+    'LAK': '₭',
+    'MNT': '₮',
+    'KZT': '₸',
+    'UAH': '₴',
+    'BYN': 'Br',
+    'MDL': 'L',
+    'RON': 'lei',
+    'BGN': 'лв',
+    'HRK': 'kn',
+    'RSD': 'дин',
+    'BAM': 'КМ',
+    'MKD': 'ден',
+    'ALL': 'L',
+    'ISK': 'kr',
+    'BHD': 'BD',
+    'QAR': 'QR',
+    'KWD': 'KD',
+    'OMR': 'ر.ع.',
+    'JOD': 'JD',
+    'LBP': 'L£',
+    'IQD': 'ع.د',
+    'IRR': '﷼',
+    'AFN': '؋',
+    'AMD': '֏',
+    'AZN': '₼',
+    'GEL': '₾',
+    'KGS': 'сом',
+    'TJS': 'ЅМ',
+    'TMT': 'm',
+    'UZS': 'so\'m',
+    'XOF': 'CFA',
+    'XAF': 'FCFA',
+    'XPF': 'F',
+    'ANG': 'ƒ',
+    'AWG': 'ƒ',
+    'BBD': '$',
+    'BMD': '$',
+    'BND': '$',
+    'BSD': '$',
+    'BWP': 'P',
+    'BZD': '$',
+    'DOP': '$',
+    'FJD': '$',
+    'GYD': '$',
+    'JMD': '$',
+    'LRD': '$',
+    'NAD': '$',
+    'SBD': '$',
+    'SRD': '$',
+    'TTD': '$',
+    'TVD': '$',
+    'XCD': '$',
+    'ZWL': '$'
+  };
+  
+  const symbol = currencySymbols[currency] || currency + ' ';
+  const formattedAmount = parseFloat(amount).toFixed(2);
+  
+  // For currencies like AED, CHF, put symbol before amount
+  if (currency === 'AED' || currency === 'CHF' || currency === 'XOF' || currency === 'XAF' || currency === 'XPF') {
+    return `${symbol}${formattedAmount}`;
+  }
+  
+  // For most currencies, put symbol before amount
+  return `${symbol}${formattedAmount}`;
+}
+
 function Dashboard() {
   const { user, logout, authenticatedFetch, API_BASE } = useAuth();
   const [campaigns, setCampaigns] = useState([]);
@@ -15,6 +131,7 @@ function Dashboard() {
     campaignPercentage: 0,
     flowPercentage: 0
   });
+  const [currency, setCurrency] = useState('USD');
   const [loading, setLoading] = useState({
     campaigns: true,
     flows: false,
@@ -82,16 +199,28 @@ function Dashboard() {
         const result = await response.json();
         
         if (result.success) {
-          // Set campaigns and flows from the response
-          setCampaigns(result.campaigns || []);
-          setFlows(result.flows || []);
+          // Filter campaigns: only show "Sent" status
+          const sentCampaigns = (result.campaigns || []).filter(campaign => {
+            const status = campaign.status || '';
+            return status.toLowerCase() === 'sent';
+          });
           
-          // Calculate campaign and flow table revenue
-          const campaignTableRevenue = (result.campaigns || []).reduce((sum, campaign) => {
+          // Filter flows: only show "Live" status
+          const liveFlows = (result.flows || []).filter(flow => {
+            const status = flow.status || '';
+            return status.toLowerCase() === 'live';
+          });
+          
+          // Set campaigns and flows from the response
+          setCampaigns(sentCampaigns);
+          setFlows(liveFlows);
+          
+          // Calculate campaign and flow table revenue (using filtered data)
+          const campaignTableRevenue = sentCampaigns.reduce((sum, campaign) => {
             return sum + (campaign.revenue || 0);
           }, 0);
           
-          const flowTableRevenue = (result.flows || []).reduce((sum, flow) => {
+          const flowTableRevenue = liveFlows.reduce((sum, flow) => {
             return sum + (flow.revenue || 0);
           }, 0);
           
@@ -104,7 +233,10 @@ function Dashboard() {
             ? ((flowTableRevenue / totalRevenue) * 100).toFixed(1)
             : '0.0';
           
-          // Set summary
+          // Set currency
+          setCurrency(result.currency || 'USD');
+          
+          // Set summary (with percentages)
           setSummary({
             totalRevenue: totalRevenue,
             campaignRevenue: campaignTableRevenue,
@@ -180,17 +312,30 @@ function Dashboard() {
           const dataResult = await dataResponse.json();
           
           if (dataResult.success) {
-            setCampaigns(dataResult.campaigns || []);
-            setFlows(dataResult.flows || []);
+            // Filter campaigns: only show "Sent" status
+            const sentCampaigns = (dataResult.campaigns || []).filter(campaign => {
+              const status = campaign.status || '';
+              return status.toLowerCase() === 'sent';
+            });
             
-            const campaignTableRevenue = (dataResult.campaigns || []).reduce((sum, campaign) => {
+            // Filter flows: only show "Live" status
+            const liveFlows = (dataResult.flows || []).filter(flow => {
+              const status = flow.status || '';
+              return status.toLowerCase() === 'live';
+            });
+            
+            setCampaigns(sentCampaigns);
+            setFlows(liveFlows);
+            
+            const campaignTableRevenue = sentCampaigns.reduce((sum, campaign) => {
               return sum + (campaign.revenue || 0);
             }, 0);
             
-            const flowTableRevenue = (dataResult.flows || []).reduce((sum, flow) => {
+            const flowTableRevenue = liveFlows.reduce((sum, flow) => {
               return sum + (flow.revenue || 0);
             }, 0);
             
+            // Calculate percentages
             const totalRevenue = dataResult.totalRevenue || 0;
             const campaignPercentage = totalRevenue > 0 
               ? ((campaignTableRevenue / totalRevenue) * 100).toFixed(1)
@@ -198,6 +343,9 @@ function Dashboard() {
             const flowPercentage = totalRevenue > 0 
               ? ((flowTableRevenue / totalRevenue) * 100).toFixed(1)
               : '0.0';
+            
+            // Set currency
+            setCurrency(dataResult.currency || 'USD');
             
             setSummary({
               totalRevenue: totalRevenue,
@@ -324,9 +472,9 @@ function Dashboard() {
     <div className="dashboard-container">
       <div className="container">
         <div className="header">
-          <h1>Campaign Attribution Dashboard</h1>
+          <h1>Email Attribution Dashboard</h1>
           <div className="user-info">
-            {accounts.length > 0 && (
+            {accounts.length > 0 ? (
               <div className="account-switcher">
                 <div className="account-select-wrapper">
                   <select 
@@ -399,6 +547,14 @@ function Dashboard() {
                   +
                 </button>
               </div>
+            ) : (
+              <button 
+                className="add-account-btn" 
+                onClick={() => setShowAddAccountModal(true)}
+                title="Add your first Klaviyo account"
+              >
+                + Add Klaviyo Account
+              </button>
             )}
             <span>{user?.email}</span>
             <button className="logout-btn" onClick={logout}>Logout</button>
@@ -455,9 +611,9 @@ function Dashboard() {
         {/* Summary Cards */}
         <div className="summary-cards">
           <div className="summary-card">
-            <div className="summary-card-title">Total Revenue</div>
+            <div className="summary-card-title">Total Email Revenue</div>
             <div className="summary-card-value">
-              {loading.summary ? '...' : `€${summary.totalRevenue.toFixed(2)}`}
+              {loading.summary ? '...' : formatCurrency(summary.totalRevenue, currency)}
             </div>
             <div className="summary-card-subtitle">Last 30 Days</div>
           </div>
@@ -466,10 +622,10 @@ function Dashboard() {
             <div className="summary-card-content">
               <div className="summary-card-left">
                 <div className="summary-card-value">{summary.campaignCount}</div>
-                <div className="summary-card-subtitle">Active Campaigns</div>
+                <div className="summary-card-subtitle">Sent Campaigns</div>
               </div>
               <div className="summary-card-right">
-                <div className="summary-card-revenue">€{summary.campaignRevenue.toFixed(2)}</div>
+                <div className="summary-card-revenue">{formatCurrency(summary.campaignRevenue, currency)}</div>
                 <div className="summary-card-percentage">{summary.campaignPercentage}% of total</div>
               </div>
             </div>
@@ -479,10 +635,10 @@ function Dashboard() {
             <div className="summary-card-content">
               <div className="summary-card-left">
                 <div className="summary-card-value">{summary.flowCount}</div>
-                <div className="summary-card-subtitle">Active Flows</div>
+                <div className="summary-card-subtitle">Live Flows</div>
               </div>
               <div className="summary-card-right">
-                <div className="summary-card-revenue">€{summary.flowRevenue.toFixed(2)}</div>
+                <div className="summary-card-revenue">{formatCurrency(summary.flowRevenue, currency)}</div>
                 <div className="summary-card-percentage">{summary.flowPercentage}% of total</div>
               </div>
             </div>
@@ -494,7 +650,7 @@ function Dashboard() {
           {loading.campaigns ? (
             <div className="loading">Loading campaigns...</div>
           ) : (
-            <CampaignTable campaigns={campaigns} />
+            <CampaignTable campaigns={campaigns} currency={currency} />
           )}
         </div>
         
@@ -503,7 +659,7 @@ function Dashboard() {
           {loading.flows ? (
             <div className="loading">Loading flows...</div>
           ) : (
-            <FlowTable flows={flows} />
+            <FlowTable flows={flows} currency={currency} />
           )}
         </div>
       </div>
@@ -511,7 +667,7 @@ function Dashboard() {
   );
 }
 
-function CampaignTable({ campaigns }) {
+function CampaignTable({ campaigns, currency = 'USD' }) {
   if (campaigns.length === 0) {
     return (
       <table>
@@ -592,7 +748,7 @@ function CampaignTable({ campaigns }) {
               </td>
               <td data-label="Placed Order">
                 <div className="metric" style={{ alignItems: 'flex-end' }}>
-                  <span className="revenue">€{campaign.revenue.toFixed(2)}</span>
+                  <span className="revenue">{formatCurrency(campaign.revenue, currency)}</span>
                   <span className="revenue-detail">
                     ({campaign.conversions} recipient{campaign.conversions !== 1 ? 's' : ''})
                   </span>
@@ -606,7 +762,7 @@ function CampaignTable({ campaigns }) {
   );
 }
 
-function FlowTable({ flows }) {
+function FlowTable({ flows, currency = 'USD' }) {
   if (flows.length === 0) {
     return (
       <table>
@@ -680,7 +836,7 @@ function FlowTable({ flows }) {
               </td>
               <td data-label="Placed Order" style={{ textAlign: 'right' }}>
                 <div className="metric" style={{ alignItems: 'flex-end' }}>
-                  <span className="revenue">€{flow.revenue.toFixed(2)}</span>
+                  <span className="revenue">{formatCurrency(flow.revenue, currency)}</span>
                   <span className="revenue-detail">
                     ({flow.conversions} recipient{flow.conversions !== 1 ? 's' : ''})
                   </span>
