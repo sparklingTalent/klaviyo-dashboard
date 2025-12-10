@@ -134,8 +134,27 @@ function Dashboard() {
       return;
     }
     
+    // IMMEDIATELY reset all data and show loading state
+    setCampaigns([]);
+    setFlows([]);
+    setSummary({
+      totalRevenue: 0,
+      campaignRevenue: 0,
+      flowRevenue: 0,
+      campaignCount: 0,
+      flowCount: 0,
+      campaignPercentage: '0.0',
+      flowPercentage: '0.0'
+    });
+    setLoading({
+      campaigns: true,
+      flows: true,
+      summary: true
+    });
+    setError(''); // Clear previous errors
+    hasFetchedRef.current = false;
+    
     try {
-      setError(''); // Clear previous errors
       const response = await authenticatedFetch(`${API_BASE}/klaviyo-accounts/${accountId}/switch`, {
         method: 'PUT'
       });
@@ -154,12 +173,9 @@ function Dashboard() {
           isActive: acc.id === accountId
         }));
         setAccounts(updatedAccounts);
-        // Reload data without full page reload
-        hasFetchedRef.current = false;
         
-        // Fetch fresh data instead of full page reload
+        // Fetch fresh data for the new account
         try {
-          setLoading(prev => ({ ...prev, campaigns: true, flows: true, summary: true }));
           const dataResponse = await authenticatedFetch(`${API_BASE}/revenue/total`);
           const dataResult = await dataResponse.json();
           
@@ -192,13 +208,18 @@ function Dashboard() {
               campaignPercentage,
               flowPercentage
             });
+          } else {
+            setError(dataResult.error || 'Failed to load data for the new account');
           }
         } catch (dataError) {
           console.error('Error reloading data after account switch:', dataError);
-          // Fallback to page reload if data fetch fails
-          window.location.reload();
+          setError('Failed to load data: ' + (dataError.message || 'Unknown error'));
         } finally {
-          setLoading(prev => ({ ...prev, campaigns: false, flows: false, summary: false }));
+          setLoading({
+            campaigns: false,
+            flows: false,
+            summary: false
+          });
         }
       } else {
         throw new Error(result.error || 'Failed to switch account');
@@ -213,6 +234,12 @@ function Dashboard() {
           select.value = activeAccount.id;
         }
       }
+      // Reset loading state on error
+      setLoading({
+        campaigns: false,
+        flows: false,
+        summary: false
+      });
     }
   };
 
