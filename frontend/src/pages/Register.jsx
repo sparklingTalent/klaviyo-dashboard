@@ -8,6 +8,7 @@ function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [klaviyoApiKey, setKlaviyoApiKey] = useState('');
+  const [accountName, setAccountName] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
@@ -53,7 +54,7 @@ function Register() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ username, email, password, klaviyoApiKey })
+        body: JSON.stringify({ username, email, password, klaviyoApiKey, accountName: accountName || null })
       });
 
       const result = await response.json();
@@ -121,6 +122,18 @@ function Register() {
                 minLength={6}
               />
               <div className="help-text">Minimum 6 characters</div>
+            </div>
+            
+            <div className="form-group">
+              <label htmlFor="accountName">Account Name (optional)</label>
+              <input
+                type="text"
+                id="accountName"
+                value={accountName}
+                onChange={(e) => setAccountName(e.target.value)}
+                placeholder="e.g., Production Account"
+              />
+              <div className="help-text">A friendly name for this Klaviyo account</div>
             </div>
             
             <div className="form-group">
