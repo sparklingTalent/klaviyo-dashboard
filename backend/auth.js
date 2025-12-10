@@ -18,11 +18,16 @@ async function loadUsers() {
 
 // Save users to file
 async function saveUsers(users) {
-  await fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2));
+  try {
+    await fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Error saving users file:', error);
+    throw new Error('Failed to save user data');
+  }
 }
 
 // Register a new client
-async function registerClient(username, email, password, klaviyoApiKey) {
+async function registerClient(username, email, password, klaviyoApiKey, accountName = null) {
   const users = await loadUsers();
   
   // Check if user already exists
@@ -37,13 +42,23 @@ async function registerClient(username, email, password, klaviyoApiKey) {
   // Hash password
   const hashedPassword = await bcrypt.hash(password, 10);
   
-  // Create new user
+  // Create new user with klaviyoAccounts array
+  // If accountName is provided, use it; otherwise generate a default name
+  const defaultAccountName = accountName || 'Default Account';
   const newUser = {
     id: Date.now().toString(),
     username,
     email,
     password: hashedPassword,
-    klaviyoApiKey,
+    // Support both old format (klaviyoApiKey) and new format (klaviyoAccounts)
+    klaviyoApiKey, // Keep for backward compatibility
+    klaviyoAccounts: [{
+      id: Date.now().toString(),
+      name: defaultAccountName,
+      apiKey: klaviyoApiKey,
+      isActive: true,
+      createdAt: new Date().toISOString()
+    }],
     createdAt: new Date().toISOString()
   };
   
@@ -102,12 +117,177 @@ async function getUserById(userId) {
     return null;
   }
   
+  // Migrate old format to new format if needed
+  if (!user.klaviyoAccounts && user.klaviyoApiKey) {
+    user.klaviyoAccounts = [{
+      id: `${userId}_${Date.now()}`,
+      name: 'Default Account',
+      apiKey: user.klaviyoApiKey,
+      isActive: true,
+      createdAt: user.createdAt || new Date().toISOString()
+    }];
+    await saveUsers(users);
+  }
+  
   return {
     id: user.id,
     username: user.username,
     email: user.email,
-    klaviyoApiKey: user.klaviyoApiKey
+    klaviyoApiKey: user.klaviyoApiKey, // Keep for backward compatibility
+    klaviyoAccounts: user.klaviyoAccounts || []
   };
+}
+
+// Get active Klaviyo account for a user
+async function getActiveKlaviyoAccount(userId) {
+  const user = await getUserById(userId);
+  if (!user) return null;
+  
+  const accounts = user.klaviyoAccounts || [];
+  const activeAccount = accounts.find(acc => acc.isActive);
+  
+  // If no active account, return the first one or the legacy klaviyoApiKey
+  if (activeAccount) {
+    return activeAccount;
+  }
+  
+  if (accounts.length > 0) {
+    return accounts[0];
+  }
+  
+  // Fallback to legacy klaviyoApiKey
+  if (user.klaviyoApiKey) {
+    return {
+      id: 'legacy',
+      name: 'Legacy Account',
+      apiKey: user.klaviyoApiKey,
+      isActive: true
+    };
+  }
+  
+  return null;
+}
+
+// Add a new Klaviyo account to a user
+async function addKlaviyoAccount(userId, accountName, apiKey) {
+  const users = await loadUsers();
+  const user = users.find(u => u.id === userId);
+  
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  // Initialize klaviyoAccounts if it doesn't exist
+  if (!user.klaviyoAccounts) {
+    user.klaviyoAccounts = [];
+  }
+  
+  // Check if API key already exists
+  if (user.klaviyoAccounts.find(acc => acc.apiKey === apiKey)) {
+    throw new Error('This API key is already added');
+  }
+  
+  // Set all existing accounts to inactive
+  user.klaviyoAccounts.forEach(acc => {
+    acc.isActive = false;
+  });
+  
+  // Add new account as active
+  const newAccount = {
+    id: `${userId}_${Date.now()}`,
+    name: accountName || 'New Account',
+    apiKey: apiKey,
+    isActive: true,
+    createdAt: new Date().toISOString()
+  };
+  
+  user.klaviyoAccounts.push(newAccount);
+  await saveUsers(users);
+  
+  return newAccount;
+}
+
+// Switch active Klaviyo account
+async function switchKlaviyoAccount(userId, accountId) {
+  try {
+    const users = await loadUsers();
+    const user = users.find(u => u.id === userId);
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    // Migrate old format if needed
+    if (!user.klaviyoAccounts && user.klaviyoApiKey) {
+      user.klaviyoAccounts = [{
+        id: `${userId}_${Date.now()}`,
+        name: 'Default Account',
+        apiKey: user.klaviyoApiKey,
+        isActive: true,
+        createdAt: user.createdAt || new Date().toISOString()
+      }];
+    }
+    
+    if (!user.klaviyoAccounts || user.klaviyoAccounts.length === 0) {
+      throw new Error('No Klaviyo accounts found');
+    }
+    
+    // Find the account to activate
+    const accountToActivate = user.klaviyoAccounts.find(acc => acc.id === accountId);
+    if (!accountToActivate) {
+      throw new Error('Account not found');
+    }
+    
+    // Set all accounts to inactive, then activate the selected one
+    user.klaviyoAccounts.forEach(acc => {
+      acc.isActive = (acc.id === accountId);
+    });
+    
+    await saveUsers(users);
+    
+    return accountToActivate;
+  } catch (error) {
+    console.error('Error in switchKlaviyoAccount:', error);
+    throw error;
+  }
+}
+
+// Delete a Klaviyo account
+async function deleteKlaviyoAccount(userId, accountId) {
+  const users = await loadUsers();
+  const user = users.find(u => u.id === userId);
+  
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  if (!user.klaviyoAccounts || user.klaviyoAccounts.length === 0) {
+    throw new Error('No Klaviyo accounts found');
+  }
+  
+  // Can't delete if it's the only account
+  if (user.klaviyoAccounts.length === 1) {
+    throw new Error('Cannot delete the only account');
+  }
+  
+  const accountIndex = user.klaviyoAccounts.findIndex(acc => acc.id === accountId);
+  if (accountIndex === -1) {
+    throw new Error('Account not found');
+  }
+  
+  const wasActive = user.klaviyoAccounts[accountIndex].isActive;
+  
+  // Remove the account
+  user.klaviyoAccounts.splice(accountIndex, 1);
+  
+  // If the deleted account was active, activate the first remaining account
+  if (wasActive && user.klaviyoAccounts.length > 0) {
+    user.klaviyoAccounts[0].isActive = true;
+  }
+  
+  await saveUsers(users);
+  
+  return { success: true };
 }
 
 // Get all users (without sensitive data)
@@ -135,7 +315,11 @@ module.exports = {
   loginUser,
   getUserById,
   getAllUsers,
-  verifyToken
+  verifyToken,
+  getActiveKlaviyoAccount,
+  addKlaviyoAccount,
+  switchKlaviyoAccount,
+  deleteKlaviyoAccount
 };
 
 

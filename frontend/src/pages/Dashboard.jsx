@@ -21,7 +21,49 @@ function Dashboard() {
     summary: false
   });
   const [error, setError] = useState('');
+  const [accounts, setAccounts] = useState([]);
+  const [activeAccount, setActiveAccount] = useState(null);
+  const [showAddAccountModal, setShowAddAccountModal] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [newAccountKey, setNewAccountKey] = useState('');
+  const [addingAccount, setAddingAccount] = useState(false);
+  const [deletingAccountId, setDeletingAccountId] = useState(null);
   const hasFetchedRef = useRef(false);
+
+  // Fetch accounts on mount
+  useEffect(() => {
+    const loadAccounts = async () => {
+      try {
+        const response = await authenticatedFetch(`${API_BASE}/klaviyo-accounts`);
+        const result = await response.json();
+        if (result.success) {
+          setAccounts(result.accounts || []);
+          const active = result.accounts?.find(acc => acc.isActive) || result.accounts?.[0];
+          setActiveAccount(active);
+        }
+      } catch (error) {
+        console.error('Error loading accounts:', error);
+      }
+    };
+    loadAccounts();
+  }, []);
+
+  // Close account menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showAccountMenu && !event.target.closest('.account-switcher')) {
+        setShowAccountMenu(false);
+      }
+    };
+
+    if (showAccountMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showAccountMenu]);
 
   useEffect(() => {
     // Prevent duplicate calls
@@ -84,7 +126,172 @@ function Dashboard() {
     };
     
     loadData();
-  }, []);
+  }, [activeAccount]);
+
+  const handleSwitchAccount = async (accountId) => {
+    if (!accountId) {
+      setError('Please select a valid account');
+      return;
+    }
+    
+    try {
+      setError(''); // Clear previous errors
+      const response = await authenticatedFetch(`${API_BASE}/klaviyo-accounts/${accountId}/switch`, {
+        method: 'PUT'
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to switch account' }));
+        throw new Error(errorData.error || 'Failed to switch account');
+      }
+      
+      const result = await response.json();
+      if (result.success) {
+        setActiveAccount(result.account);
+        // Update accounts list
+        const updatedAccounts = accounts.map(acc => ({
+          ...acc,
+          isActive: acc.id === accountId
+        }));
+        setAccounts(updatedAccounts);
+        // Reload data without full page reload
+        hasFetchedRef.current = false;
+        
+        // Fetch fresh data instead of full page reload
+        try {
+          setLoading(prev => ({ ...prev, campaigns: true, flows: true, summary: true }));
+          const dataResponse = await authenticatedFetch(`${API_BASE}/revenue/total`);
+          const dataResult = await dataResponse.json();
+          
+          if (dataResult.success) {
+            setCampaigns(dataResult.campaigns || []);
+            setFlows(dataResult.flows || []);
+            
+            const campaignTableRevenue = (dataResult.campaigns || []).reduce((sum, campaign) => {
+              return sum + (campaign.revenue || 0);
+            }, 0);
+            
+            const flowTableRevenue = (dataResult.flows || []).reduce((sum, flow) => {
+              return sum + (flow.revenue || 0);
+            }, 0);
+            
+            const totalRevenue = dataResult.totalRevenue || 0;
+            const campaignPercentage = totalRevenue > 0 
+              ? ((campaignTableRevenue / totalRevenue) * 100).toFixed(1)
+              : '0.0';
+            const flowPercentage = totalRevenue > 0 
+              ? ((flowTableRevenue / totalRevenue) * 100).toFixed(1)
+              : '0.0';
+            
+            setSummary({
+              totalRevenue: totalRevenue,
+              campaignRevenue: campaignTableRevenue,
+              flowRevenue: flowTableRevenue,
+              campaignCount: dataResult.totalCampaigns || 0,
+              flowCount: dataResult.totalFlows || 0,
+              campaignPercentage,
+              flowPercentage
+            });
+          }
+        } catch (dataError) {
+          console.error('Error reloading data after account switch:', dataError);
+          // Fallback to page reload if data fetch fails
+          window.location.reload();
+        } finally {
+          setLoading(prev => ({ ...prev, campaigns: false, flows: false, summary: false }));
+        }
+      } else {
+        throw new Error(result.error || 'Failed to switch account');
+      }
+    } catch (error) {
+      console.error('Error switching account:', error);
+      setError('Failed to switch account: ' + (error.message || 'Unknown error'));
+      // Reset dropdown to previous selection
+      if (activeAccount) {
+        const select = document.querySelector('.account-select');
+        if (select) {
+          select.value = activeAccount.id;
+        }
+      }
+    }
+  };
+
+  const handleAddAccount = async (e) => {
+    e.preventDefault();
+    if (!newAccountKey.trim()) {
+      setError('API key is required');
+      return;
+    }
+    
+    setAddingAccount(true);
+    try {
+      const response = await authenticatedFetch(`${API_BASE}/klaviyo-accounts`, {
+        method: 'POST',
+        body: JSON.stringify({
+          accountName: newAccountName.trim() || 'New Account',
+          apiKey: newAccountKey.trim()
+        })
+      });
+      const result = await response.json();
+      if (result.success) {
+        setAccounts([...accounts, result.account]);
+        setActiveAccount(result.account);
+        setShowAddAccountModal(false);
+        setNewAccountName('');
+        setNewAccountKey('');
+        // Reload data
+        hasFetchedRef.current = false;
+        window.location.reload();
+      } else {
+        setError(result.error || 'Failed to add account');
+      }
+    } catch (error) {
+      console.error('Error adding account:', error);
+      setError('Failed to add account: ' + error.message);
+    } finally {
+      setAddingAccount(false);
+    }
+  };
+
+  const handleDeleteAccount = async (accountId) => {
+    if (accounts.length <= 1) {
+      setError('Cannot delete the only account. Please add another account first.');
+      return;
+    }
+    
+    if (!window.confirm(`Are you sure you want to delete "${accounts.find(acc => acc.id === accountId)?.name || 'this account'}"? This action cannot be undone.`)) {
+      return;
+    }
+    
+    setDeletingAccountId(accountId);
+    try {
+      const response = await authenticatedFetch(`${API_BASE}/klaviyo-accounts/${accountId}`, {
+        method: 'DELETE'
+      });
+      const result = await response.json();
+      if (result.success) {
+        const updatedAccounts = accounts.filter(acc => acc.id !== accountId);
+        setAccounts(updatedAccounts);
+        setShowAccountMenu(false);
+        
+        if (updatedAccounts.length > 0) {
+          // If we deleted the active account, switch to the first remaining one
+          if (activeAccount?.id === accountId) {
+            await handleSwitchAccount(updatedAccounts[0].id);
+          } else {
+            setActiveAccount(activeAccount);
+          }
+        }
+      } else {
+        setError(result.error || 'Failed to delete account');
+      }
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      setError('Failed to delete account: ' + (error.message || 'Unknown error'));
+    } finally {
+      setDeletingAccountId(null);
+    }
+  };
 
   return (
     <div className="dashboard-container">
@@ -92,10 +299,129 @@ function Dashboard() {
         <div className="header">
           <h1>Campaign Attribution Dashboard</h1>
           <div className="user-info">
+            {accounts.length > 0 && (
+              <div className="account-switcher">
+                <div className="account-select-wrapper">
+                  <select 
+                    value={activeAccount?.id || ''} 
+                    onChange={(e) => handleSwitchAccount(e.target.value)}
+                    className="account-select"
+                  >
+                    {accounts.map(account => (
+                      <option key={account.id} value={account.id}>
+                        {account.name} {account.isActive ? '(Active)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="account-menu-btn"
+                    onClick={() => setShowAccountMenu(!showAccountMenu)}
+                    title="Manage accounts"
+                  >
+                    ⋮
+                  </button>
+                </div>
+                {showAccountMenu && (
+                  <div className="account-menu">
+                    <div className="account-menu-header">
+                      <span>Manage Accounts</span>
+                      <button 
+                        className="close-menu-btn"
+                        onClick={() => setShowAccountMenu(false)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="account-list">
+                      {accounts.map(account => (
+                        <div 
+                          key={account.id} 
+                          className={`account-item ${account.isActive ? 'active' : ''}`}
+                        >
+                          <div className="account-info">
+                            <span className="account-name">{account.name}</span>
+                            {account.isActive && <span className="active-badge">Active</span>}
+                          </div>
+                          <button
+                            className="delete-account-btn"
+                            onClick={() => handleDeleteAccount(account.id)}
+                            disabled={deletingAccountId === account.id || accounts.length <= 1}
+                            title={accounts.length <= 1 ? 'Cannot delete the only account' : 'Delete account'}
+                          >
+                            {deletingAccountId === account.id ? '...' : '🗑️'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      className="add-account-menu-btn"
+                      onClick={() => {
+                        setShowAccountMenu(false);
+                        setShowAddAccountModal(true);
+                      }}
+                    >
+                      + Add New Account
+                    </button>
+                  </div>
+                )}
+                <button 
+                  className="add-account-btn" 
+                  onClick={() => setShowAddAccountModal(true)}
+                  title="Add new Klaviyo account"
+                >
+                  +
+                </button>
+              </div>
+            )}
             <span>{user?.email}</span>
             <button className="logout-btn" onClick={logout}>Logout</button>
           </div>
         </div>
+
+        {showAddAccountModal && (
+          <div className="modal-overlay" onClick={() => setShowAddAccountModal(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <h2>Add Klaviyo Account</h2>
+              <form onSubmit={handleAddAccount}>
+                <div className="form-group">
+                  <label>Account Name (optional)</label>
+                  <input
+                    type="text"
+                    value={newAccountName}
+                    onChange={(e) => setNewAccountName(e.target.value)}
+                    placeholder="e.g., Production Account"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Klaviyo API Key *</label>
+                  <input
+                    type="text"
+                    value={newAccountKey}
+                    onChange={(e) => setNewAccountKey(e.target.value)}
+                    placeholder="pk_..."
+                    required
+                  />
+                </div>
+                <div className="modal-actions">
+                  <button 
+                    type="button" 
+                    className="cancel-btn"
+                    onClick={() => {
+                      setShowAddAccountModal(false);
+                      setNewAccountName('');
+                      setNewAccountKey('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="submit-btn" disabled={addingAccount}>
+                    {addingAccount ? 'Adding...' : 'Add Account'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {error && <div className="error" style={{ display: 'block' }}>{error}</div>}
         

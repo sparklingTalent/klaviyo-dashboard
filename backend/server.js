@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const { registerClient, loginUser, getUserById, getAllUsers, verifyToken } = require('./auth');
+const { registerClient, loginUser, getUserById, getAllUsers, verifyToken, getActiveKlaviyoAccount, addKlaviyoAccount, switchKlaviyoAccount, deleteKlaviyoAccount } = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -45,7 +45,7 @@ async function authenticate(req, res, next) {
 // Auth Routes
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { username, email, password, klaviyoApiKey } = req.body;
+    const { username, email, password, klaviyoApiKey, accountName } = req.body;
     
     if (!username || !email || !password || !klaviyoApiKey) {
       return res.status(400).json({
@@ -54,7 +54,7 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
     
-    const user = await registerClient(username, email, password, klaviyoApiKey);
+    const user = await registerClient(username, email, password, klaviyoApiKey, accountName);
     res.json({
       success: true,
       message: 'Client registered successfully',
@@ -93,12 +93,15 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.get('/api/auth/me', authenticate, async (req, res) => {
+  // Get full user data including accounts
+  const fullUser = await getUserById(req.user.id);
   res.json({
     success: true,
     user: {
-      id: req.user.id,
-      username: req.user.username,
-      email: req.user.email
+      id: fullUser.id,
+      username: fullUser.username,
+      email: fullUser.email,
+      klaviyoAccounts: fullUser.klaviyoAccounts || []
     }
   });
 });
@@ -119,18 +122,117 @@ app.get('/api/auth/clients', async (req, res) => {
   }
 });
 
+// Klaviyo Account Management Endpoints
+app.get('/api/klaviyo-accounts', authenticate, async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    res.json({
+      success: true,
+      accounts: user.klaviyoAccounts || []
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/api/klaviyo-accounts', authenticate, async (req, res) => {
+  try {
+    const { accountName, apiKey } = req.body;
+    
+    if (!apiKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'API key is required'
+      });
+    }
+    
+    const account = await addKlaviyoAccount(req.user.id, accountName, apiKey);
+    res.json({
+      success: true,
+      account
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.put('/api/klaviyo-accounts/:accountId/switch', authenticate, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    
+    if (!accountId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Account ID is required'
+      });
+    }
+    
+    const account = await switchKlaviyoAccount(req.user.id, accountId);
+    
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      account
+    });
+  } catch (error) {
+    console.error('Error switching account:', error);
+    
+    // Ensure response hasn't been sent
+    if (!res.headersSent) {
+      res.status(400).json({
+        success: false,
+        error: error.message || 'Failed to switch account'
+      });
+    }
+  }
+});
+
+app.delete('/api/klaviyo-accounts/:accountId', authenticate, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    await deleteKlaviyoAccount(req.user.id, accountId);
+    res.json({
+      success: true,
+      message: 'Account deleted successfully'
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Helper function to add 0.1s delay between API calls
 const delay = (ms = 100) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper function to fetch account timezone from Klaviyo
 async function getKlaviyoAccountTimezone(userApiKey) {
+  if (!userApiKey) {
+    console.log('No API key provided, using default timezone: UTC');
+    return 'UTC';
+  }
+  
   try {
     const accountsResponse = await axios.get(`${KLAVIYO_BASE_URL}/accounts/`, {
       headers: {
         'Authorization': `Klaviyo-API-Key ${userApiKey}`,
         'revision': '2024-10-15',
         'Accept': 'application/json'
-      }
+      },
+      timeout: 10000 // 10 second timeout
     });
     
     // Extract timezone from account data
@@ -155,7 +257,14 @@ async function getKlaviyoAccountTimezone(userApiKey) {
 // Endpoint to get total revenue from all Placed Order events in last 30 days
 app.get('/api/revenue/total', authenticate, async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
+    const userApiKey = await getUserApiKey(req);
+    
+    if (!userApiKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'No Klaviyo API key found. Please add a Klaviyo account.'
+      });
+    }
     
     // Fetch account timezone from Klaviyo
     const accountTimezone = await getKlaviyoAccountTimezone(userApiKey);
@@ -1362,10 +1471,15 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching aggregate data:', error.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      error: error.response?.data?.errors || error.message
-    });
+    console.error('Full error:', error);
+    
+    // Ensure response hasn't been sent yet
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: error.response?.data?.errors?.[0]?.detail || error.response?.data?.errors || error.message || 'An error occurred while fetching data'
+      });
+    }
   }
 });
 
@@ -1438,8 +1552,39 @@ function extractRevenue(props, eventId = 'unknown') {
 }
 
 // Helper function to get user's Klaviyo API key
-function getUserApiKey(req) {
-  return req.user.klaviyoApiKey;
+async function getUserApiKey(req) {
+  try {
+    // Try to get active account from klaviyoAccounts array
+    const user = await getUserById(req.user.id);
+    
+    if (!user) {
+      console.error('User not found in getUserApiKey');
+      return null;
+    }
+    
+    if (user.klaviyoAccounts && user.klaviyoAccounts.length > 0) {
+      const activeAccount = user.klaviyoAccounts.find(acc => acc.isActive);
+      if (activeAccount && activeAccount.apiKey) {
+        return activeAccount.apiKey;
+      }
+      // If no active account, use the first one
+      if (user.klaviyoAccounts[0] && user.klaviyoAccounts[0].apiKey) {
+        return user.klaviyoAccounts[0].apiKey;
+      }
+    }
+    
+    // Fallback to legacy klaviyoApiKey
+    const legacyKey = req.user?.klaviyoApiKey || user?.klaviyoApiKey;
+    if (legacyKey) {
+      return legacyKey;
+    }
+    
+    console.error('No API key found for user:', req.user.id);
+    return null;
+  } catch (error) {
+    console.error('Error in getUserApiKey:', error);
+    return null;
+  }
 }
 
 // Endpoint to fetch campaigns - DEPRECATED: Use /api/revenue/total instead
@@ -1450,7 +1595,7 @@ app.get('/api/campaigns', authenticate, async (req, res) => {
     
     console.log('Fetching campaigns created after:', startTimestamp);
     
-    const userApiKey = getUserApiKey(req);
+    const userApiKey = await getUserApiKey(req);
     
     // Fetch email campaigns from Klaviyo
     const emailResponse = await axios.get(`${KLAVIYO_BASE_URL}/campaigns/`, {
@@ -1668,7 +1813,7 @@ app.get('/api/campaigns', authenticate, async (req, res) => {
 // Endpoint to fetch flows with metrics
 app.get('/api/flows', authenticate, async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
+    const userApiKey = await getUserApiKey(req);
     console.log('Fetching all flows...');
     
     // Fetch all flows from Klaviyo
@@ -1839,7 +1984,7 @@ app.get('/api/flows', authenticate, async (req, res) => {
 // Endpoint to fetch Placed Order events by campaign
 app.get('/api/campaigns/by-status', authenticate, async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
+    const userApiKey = await getUserApiKey(req);
     const { status } = req.query;
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
@@ -1993,7 +2138,7 @@ app.get('/api/campaigns/by-status', authenticate, async (req, res) => {
 // Endpoint to fetch campaign values/metrics (aggregate data)
 app.get('/api/campaigns/:campaignId/values', authenticate, async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
+    const userApiKey = await getUserApiKey(req);
     const { campaignId } = req.params;
     
     console.log(`Fetching values for campaign: ${campaignId}`);
@@ -2060,7 +2205,7 @@ app.listen(PORT, () => {
 // Helper endpoint to get all available metrics (for debugging)
 app.get('/api/metrics', authenticate, async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
+    const userApiKey = await getUserApiKey(req);
     const response = await axios.get(`${KLAVIYO_BASE_URL}/metrics/`, {
       headers: {
         'Authorization': `Klaviyo-API-Key ${userApiKey}`,
@@ -2085,7 +2230,7 @@ app.get('/api/metrics', authenticate, async (req, res) => {
 // Endpoint to fetch attribution data for a campaign
 app.get('/api/campaigns/:campaignId/attribution', authenticate, async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
+    const userApiKey = await getUserApiKey(req);
     const { campaignId } = req.params;
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
@@ -2139,7 +2284,7 @@ app.get('/api/campaigns/:campaignId/attribution', authenticate, async (req, res)
 // Endpoint to fetch Placed Order events by flow
 app.get('/api/flows/by-status', authenticate, async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
+    const userApiKey = await getUserApiKey(req);
     const { status } = req.query;
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
@@ -2272,7 +2417,7 @@ app.get('/api/flows/by-status', authenticate, async (req, res) => {
 // Endpoint to fetch attribution data for a flow
 app.get('/api/flows/:flowId/attribution', authenticate, async (req, res) => {
   try {
-    const userApiKey = getUserApiKey(req);
+    const userApiKey = await getUserApiKey(req);
     const { flowId } = req.params;
     const { start } = getLast30Days();
     const startTimestamp = new Date(start).toISOString();
