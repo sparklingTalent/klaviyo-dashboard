@@ -288,6 +288,7 @@ async function getKlaviyoAccountTimezone(userApiKey) {
 
 // Helper function to fetch account currency from Klaviyo
 async function getKlaviyoAccountCurrency(userApiKey) {
+  await delay(1000); // 0.1s delay
   if (!userApiKey) {
     console.log('No API key provided, using default currency: USD');
     return 'USD';
