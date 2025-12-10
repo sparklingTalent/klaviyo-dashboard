@@ -47,14 +47,14 @@ app.post('/api/auth/register', async (req, res) => {
   try {
     const { username, email, password, klaviyoApiKey, accountName } = req.body;
     
-    if (!username || !email || !password || !klaviyoApiKey) {
+    if (!username || !email || !password) {
       return res.status(400).json({
         success: false,
-        error: 'All fields are required'
+        error: 'Username, email, and password are required'
       });
     }
     
-    const user = await registerClient(username, email, password, klaviyoApiKey, accountName);
+    const user = await registerClient(username, email, password, klaviyoApiKey || null, accountName);
     res.json({
       success: true,
       message: 'Client registered successfully',
@@ -254,6 +254,202 @@ async function getKlaviyoAccountTimezone(userApiKey) {
   }
 }
 
+// Helper function to fetch account currency from Klaviyo
+async function getKlaviyoAccountCurrency(userApiKey) {
+  if (!userApiKey) {
+    console.log('No API key provided, using default currency: USD');
+    return 'USD';
+  }
+  
+  try {
+    const accountsResponse = await axios.get(`${KLAVIYO_BASE_URL}/accounts/`, {
+      headers: {
+        'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+        'revision': '2024-10-15',
+        'Accept': 'application/json'
+      },
+      timeout: 10000 // 10 second timeout
+    });
+    
+    // Log full response for debugging
+    console.log('=== ACCOUNT DATA DEBUG ===');
+    console.log('Full accounts response:', JSON.stringify(accountsResponse.data, null, 2));
+    
+    // Extract currency from account data
+    const accountData = accountsResponse.data?.data;
+    console.log('Account data array:', accountData);
+    console.log('Account data length:', accountData?.length);
+    
+    if (accountData && accountData.length > 0) {
+      const account = accountData[0];
+      console.log('First account object:', JSON.stringify(account, null, 2));
+      console.log('Account attributes keys:', Object.keys(account?.attributes || {}));
+      
+      if (account?.attributes) {
+        console.log('Full account attributes:', JSON.stringify(account.attributes, null, 2));
+      }
+      
+      // Try different possible paths for currency (Klaviyo uses 'preferredCurrency' in attributes)
+      const currency = account?.attributes?.preferredCurrency || 
+                       account?.attributes?.preferred_currency ||
+                       account?.attributes?.currency ||
+                       account?.attributes?.contact_information?.currency ||
+                       account?.currency ||
+                       account?.attributes?.contact_information?.default_currency;
+      
+      console.log('Extracted currency value:', currency);
+      
+      if (currency) {
+        console.log(`✓ Fetched Klaviyo account currency: ${currency}`);
+        console.log('=== END ACCOUNT DATA DEBUG ===');
+        return currency;
+      } else {
+        // Log available attributes for debugging
+        console.log('✗ Currency not found. Checking all possible paths...');
+        console.log('  account?.attributes?.preferredCurrency:', account?.attributes?.preferredCurrency);
+        console.log('  account?.attributes?.preferred_currency:', account?.attributes?.preferred_currency);
+        console.log('  account?.attributes?.currency:', account?.attributes?.currency);
+        console.log('  account?.attributes?.contact_information?.currency:', account?.attributes?.contact_information?.currency);
+        console.log('  account?.currency:', account?.currency);
+        console.log('  account?.attributes?.contact_information?.default_currency:', account?.attributes?.contact_information?.default_currency);
+      }
+    } else {
+      console.log('✗ No account data found in response');
+    }
+    
+    console.log('=== END ACCOUNT DATA DEBUG ===');
+    
+    // Fallback to USD if currency not found
+    console.log('Using default currency: USD');
+    return 'USD';
+  } catch (error) {
+    console.log('=== ERROR FETCHING ACCOUNT CURRENCY ===');
+    console.log('Error message:', error.message);
+    console.log('Error response status:', error.response?.status);
+    console.log('Error response data:', JSON.stringify(error.response?.data || {}, null, 2));
+    console.log('Full error object:', error);
+    console.log('=== END ERROR DEBUG ===');
+    // Fallback to USD if API call fails
+    return 'USD';
+  }
+}
+
+// Helper function to format currency
+function formatCurrency(amount, currency = 'USD') {
+  const currencySymbols = {
+    'USD': '$',
+    'GBP': '£',
+    'EUR': '€',
+    'AED': 'AED ',
+    'AUD': 'A$',
+    'CAD': 'C$',
+    'JPY': '¥',
+    'CHF': 'CHF ',
+    'CNY': '¥',
+    'INR': '₹',
+    'SGD': 'S$',
+    'HKD': 'HK$',
+    'NZD': 'NZ$',
+    'MXN': 'MX$',
+    'BRL': 'R$',
+    'ZAR': 'R',
+    'SEK': 'kr',
+    'NOK': 'kr',
+    'DKK': 'kr',
+    'PLN': 'zł',
+    'CZK': 'Kč',
+    'HUF': 'Ft',
+    'RUB': '₽',
+    'TRY': '₺',
+    'ILS': '₪',
+    'SAR': 'SR',
+    'THB': '฿',
+    'MYR': 'RM',
+    'PHP': '₱',
+    'IDR': 'Rp',
+    'KRW': '₩',
+    'VND': '₫',
+    'TWD': 'NT$',
+    'CLP': 'CLP$',
+    'ARS': '$',
+    'COP': 'COL$',
+    'PEN': 'S/',
+    'EGP': 'E£',
+    'NGN': '₦',
+    'KES': 'KSh',
+    'PKR': '₨',
+    'BDT': '৳',
+    'LKR': 'Rs',
+    'NPR': 'Rs',
+    'MMK': 'K',
+    'KHR': '៛',
+    'LAK': '₭',
+    'MNT': '₮',
+    'KZT': '₸',
+    'UAH': '₴',
+    'BYN': 'Br',
+    'MDL': 'L',
+    'RON': 'lei',
+    'BGN': 'лв',
+    'HRK': 'kn',
+    'RSD': 'дин',
+    'BAM': 'КМ',
+    'MKD': 'ден',
+    'ALL': 'L',
+    'ISK': 'kr',
+    'BHD': 'BD',
+    'QAR': 'QR',
+    'KWD': 'KD',
+    'OMR': 'ر.ع.',
+    'JOD': 'JD',
+    'LBP': 'L£',
+    'IQD': 'ع.د',
+    'IRR': '﷼',
+    'AFN': '؋',
+    'AMD': '֏',
+    'AZN': '₼',
+    'GEL': '₾',
+    'KGS': 'сом',
+    'TJS': 'ЅМ',
+    'TMT': 'm',
+    'UZS': 'so\'m',
+    'XOF': 'CFA',
+    'XAF': 'FCFA',
+    'XPF': 'F',
+    'ANG': 'ƒ',
+    'AWG': 'ƒ',
+    'BBD': '$',
+    'BMD': '$',
+    'BND': '$',
+    'BSD': '$',
+    'BWP': 'P',
+    'BZD': '$',
+    'DOP': '$',
+    'FJD': '$',
+    'GYD': '$',
+    'JMD': '$',
+    'LRD': '$',
+    'NAD': '$',
+    'SBD': '$',
+    'SRD': '$',
+    'TTD': '$',
+    'TVD': '$',
+    'XCD': '$',
+    'ZWL': '$'
+  };
+  
+  const symbol = currencySymbols[currency] || currency + ' ';
+  const formattedAmount = parseFloat(amount).toFixed(2);
+  
+  // For currencies like AED, put symbol before amount
+  if (currency === 'AED' || currency === 'CHF' || currency === 'XOF' || currency === 'XAF' || currency === 'XPF') {
+    return `${symbol}${formattedAmount}`;
+  }
+  
+  // For most currencies, put symbol before amount
+  return `${symbol}${formattedAmount}`;
+}
+
 // Endpoint to get total revenue from all Placed Order events in last 30 days
 app.get('/api/revenue/total', authenticate, async (req, res) => {
   try {
@@ -266,13 +462,15 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
       });
     }
     
-    // Fetch account timezone from Klaviyo
+    // Fetch account timezone and currency from Klaviyo
     const accountTimezone = await getKlaviyoAccountTimezone(userApiKey);
+    await delay(); // 0.1s delay
+    const accountCurrency = await getKlaviyoAccountCurrency(userApiKey);
     await delay(); // 0.1s delay
     
     const { start, end } = getLast30Days(accountTimezone);
     
-    console.log(`Using account timezone: ${accountTimezone}`);
+    console.log(`Using account timezone: ${accountTimezone}, currency: ${accountCurrency}`);
     console.log('Fetching total revenue, campaigns, and flows using metric-aggregates API...');
     
     // Get all metrics
@@ -632,10 +830,12 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
       
       // Filter campaigns from last 30 days (reuse the filteredCampaigns variable declared at top)
       filteredCampaigns = allCampaigns.filter(campaign => {
+        const status = campaign.attributes?.status || '';
         const campaignDate = new Date(campaign.attributes?.updated_at || campaign.attributes?.created_at);
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        return campaignDate >= thirtyDaysAgo;
+        // Only include "Sent" status campaigns from last 30 days
+        return status.toLowerCase() === 'sent' && campaignDate >= thirtyDaysAgo;
       });
       
       // Map campaign ID to message IDs, message labels, and message type
@@ -1146,10 +1346,10 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
       
       const allFlows = flowsResponse.data.data || [];
       
-      // Filter out draft flows only (same as /api/flows endpoint)
+      // Filter flows: only include "Live" flows
       const filteredFlows = allFlows.filter(flow => {
         const status = flow.attributes?.status || '';
-        return status.toLowerCase() !== 'draft';
+        return status.toLowerCase() === 'live';
       });
       
       totalFlows = filteredFlows.length;
@@ -1211,10 +1411,10 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
       
       const allFlows = flowsResponse.data.data || [];
       
-      // Filter out draft flows
+      // Filter flows: only include "Live" flows
       const activeFlows = allFlows.filter(flow => {
         const status = flow.attributes?.status || '';
-        return status.toLowerCase() !== 'draft';
+        return status.toLowerCase() === 'live';
       });
       
       // Step 2: Fetch flow-level metrics directly using by: ['$flow']
@@ -1467,6 +1667,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
       attributedFlowRevenue: attributedFlowRevenue,
       campaigns: campaignsTable,
       flows: flowsTable,
+      currency: accountCurrency,
       timeframe: 'Last 30 days'
     });
   } catch (error) {

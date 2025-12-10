@@ -7,8 +7,6 @@ function Register() {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [klaviyoApiKey, setKlaviyoApiKey] = useState('');
-  const [accountName, setAccountName] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
@@ -54,7 +52,7 @@ function Register() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ username, email, password, klaviyoApiKey, accountName: accountName || null })
+        body: JSON.stringify({ username, email, password })
       });
 
       const result = await response.json();
@@ -122,31 +120,6 @@ function Register() {
                 minLength={6}
               />
               <div className="help-text">Minimum 6 characters</div>
-            </div>
-            
-            <div className="form-group">
-              <label htmlFor="accountName">Account Name (optional)</label>
-              <input
-                type="text"
-                id="accountName"
-                value={accountName}
-                onChange={(e) => setAccountName(e.target.value)}
-                placeholder="e.g., Production Account"
-              />
-              <div className="help-text">A friendly name for this Klaviyo account</div>
-            </div>
-            
-            <div className="form-group">
-              <label htmlFor="klaviyoApiKey">Klaviyo Private API Key</label>
-              <input
-                type="text"
-                id="klaviyoApiKey"
-                value={klaviyoApiKey}
-                onChange={(e) => setKlaviyoApiKey(e.target.value)}
-                required
-                placeholder="pk_... or sk_..."
-              />
-              <div className="help-text">Your Klaviyo API key (starts with pk_ or sk_)</div>
             </div>
             
             <button type="submit" disabled={loading}>
