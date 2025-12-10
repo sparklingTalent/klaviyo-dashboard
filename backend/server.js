@@ -218,6 +218,38 @@ app.delete('/api/klaviyo-accounts/:accountId', authenticate, async (req, res) =>
 // Helper function to add 0.1s delay between API calls
 const delay = (ms = 100) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper function to retry API calls on rate limit (429) errors
+async function retryApiCall(apiCall, maxRetries = 3, retryDelay = 1000) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await apiCall();
+    } catch (error) {
+      // Check if it's a rate limit error (429)
+      const isRateLimit = error.response?.status === 429 || 
+                         error.response?.data?.errors?.[0]?.code === 'throttled';
+      
+      if (isRateLimit && attempt < maxRetries) {
+        // Extract retry delay from error message if available
+        let waitTime = retryDelay;
+        const errorDetail = error.response?.data?.errors?.[0]?.detail || '';
+        const match = errorDetail.match(/Expected available in (\d+) second/i);
+        if (match) {
+          waitTime = parseInt(match[1]) * 1000; // Convert seconds to milliseconds
+          // Add a small buffer (500ms) to be safe
+          waitTime += 500;
+        }
+        
+        console.log(`Rate limited (429). Retrying in ${waitTime}ms (attempt ${attempt + 1}/${maxRetries})...`);
+        await delay(waitTime);
+        continue;
+      }
+      
+      // If not a rate limit error, or max retries reached, throw the error
+      throw error;
+    }
+  }
+}
+
 // Helper function to fetch account timezone from Klaviyo
 async function getKlaviyoAccountTimezone(userApiKey) {
   if (!userApiKey) {
@@ -481,6 +513,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
         'Accept': 'application/json'
       }
     });
+    await delay(); // 0.1s delay
     
     const metrics = metricsResponse.data?.data || [];
     const placedOrderMetric = metrics.find(m => 
@@ -536,28 +569,30 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
     const filterString = processedFilters.join(',');
     
     // 1. Get total revenue from Placed Order metric (MUST be fetched first)
-    const revenueAggregateResponse = await axios.post(
-      `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-      {
-        data: {
-          type: 'metric-aggregate',
-          attributes: {
-            metric_id: placedOrderMetricId,
-            measurements: ['sum_value'],
-            filter: filterString,
-            timezone: accountTimezone
+    const revenueAggregateResponse = await retryApiCall(async () => {
+      return await axios.post(
+        `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+        {
+          data: {
+            type: 'metric-aggregate',
+            attributes: {
+              metric_id: placedOrderMetricId,
+              measurements: ['sum_value'],
+              filter: filterString,
+              timezone: accountTimezone
+            }
+          }
+        },
+        {
+          headers: {
+            'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+            'revision': '2024-10-15',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
           }
         }
-      },
-      {
-        headers: {
-          'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-          'revision': '2024-10-15',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
-    );
+      );
+    });
     await delay(); // 0.1s delay
     
     // Extract total revenue using the proper response structure
@@ -642,32 +677,34 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
     let attributedFlowRevenue = {};
     
     try {
-      const flowRevenueAggregateResponse = await axios.post(
-        `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-        {
-          data: {
-            type: 'metric-aggregate',
-            attributes: {
-              metric_id: placedOrderMetricId,
-              measurements: ['sum_value'],
-              by: ['$attributed_flow'],
-              filter: [
-                ...processedFilters,
-                `not(equals($attributed_flow,""))`
-              ],
-              timezone: accountTimezone
+      const flowRevenueAggregateResponse = await retryApiCall(async () => {
+        return await axios.post(
+          `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+          {
+            data: {
+              type: 'metric-aggregate',
+              attributes: {
+                metric_id: placedOrderMetricId,
+                measurements: ['sum_value'],
+                by: ['$attributed_flow'],
+                filter: [
+                  ...processedFilters,
+                  `not(equals($attributed_flow,""))`
+                ],
+                timezone: accountTimezone
+              }
+            }
+          },
+          {
+            headers: {
+              'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+              'revision': '2024-10-15',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
             }
           }
-        },
-        {
-          headers: {
-            'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-            'revision': '2024-10-15',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          }
-        }
-      );
+        );
+      });
       await delay(); // 0.1s delay
       
       // Extract grouped flow revenue and count recipients (non-zero sum_value entries)
@@ -707,32 +744,34 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
     // Get flow conversions (count of Placed Order events) grouped by flow
     const flowConversionsFromRevenue = {}; // flowId -> conversions count
     try {
-      const flowConversionsAggregateResponse = await axios.post(
-        `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-        {
-          data: {
-            type: 'metric-aggregate',
-            attributes: {
-              metric_id: placedOrderMetricId,
-              measurements: ['count'],
-              by: ['$attributed_flow'],
-              filter: [
-                ...processedFilters,
-                `not(equals($attributed_flow,""))`
-              ],
-              timezone: accountTimezone
+      const flowConversionsAggregateResponse = await retryApiCall(async () => {
+        return await axios.post(
+          `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+          {
+            data: {
+              type: 'metric-aggregate',
+              attributes: {
+                metric_id: placedOrderMetricId,
+                measurements: ['count'],
+                by: ['$attributed_flow'],
+                filter: [
+                  ...processedFilters,
+                  `not(equals($attributed_flow,""))`
+                ],
+                timezone: accountTimezone
+              }
+            }
+          },
+          {
+            headers: {
+              'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+              'revision': '2024-10-15',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
             }
           }
-        },
-        {
-          headers: {
-            'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-            'revision': '2024-10-15',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          }
-        }
-      );
+        );
+      });
       await delay(); // 0.1s delay
       
       // Extract flow conversions count
@@ -818,6 +857,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             'sort': '-updated_at'
           }
         });
+        await delay(); // 0.1s delay
       } catch (error) {
         smsResponse = { data: { data: [], included: [] } };
         console.log(`SMS Campaigns API Error: ${error.response?.data || error.message}`);
@@ -927,34 +967,53 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             }
           };
           
-          const opensResponse = await axios.post(
-            `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-            opensPayload,
-            {
-              headers: {
-                'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-                'revision': '2024-10-15',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+          const opensResponse = await retryApiCall(async () => {
+            return await axios.post(
+              `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+              opensPayload,
+              {
+                headers: {
+                  'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+                  'revision': '2024-10-15',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                }
               }
-            }
-          );
+            );
+          });
           await delay(); // 0.1s delay
           
           // Store opens per message ID
           if (opensResponse.data?.data?.attributes?.data) {
+            console.log(`Opens response sample: ${JSON.stringify(opensResponse.data?.data?.attributes?.data?.[0], null, 2)}`);
             opensResponse.data.data.attributes.data.forEach(group => {
-              // Correct dimensions access: group.dimensions[0]
-              const messageId = group?.dimensions?.[0];
+              // Handle both array and object dimensions formats
+              let messageId = null;
+              if (Array.isArray(group.dimensions)) {
+                messageId = group.dimensions[0];
+              } else if (group.dimensions && typeof group.dimensions === 'object') {
+                messageId = group.dimensions["$message"];
+              }
+              
               if (messageId) {
                 const measurements = group?.measurements;
+                console.log(`Message ${messageId} measurements: ${JSON.stringify(measurements)}`);
+                // Check for both count and unique measurements
+                let count = 0;
                 if (measurements?.count !== undefined) {
-                  let count = 0;
                   if (Array.isArray(measurements.count)) {
                     count = measurements.count.reduce((acc, val) => acc + (parseInt(val) || 0), 0);
                   } else {
                     count = parseInt(measurements.count) || 0;
                   }
+                } else if (measurements?.unique !== undefined) {
+                  if (Array.isArray(measurements.unique)) {
+                    count = measurements.unique.reduce((acc, val) => acc + (parseInt(val) || 0), 0);
+                  } else {
+                    count = parseInt(measurements.unique) || 0;
+                  }
+                }
+                if (count > 0) {
                   messageOpensMap[messageId] = (messageOpensMap[messageId] || 0) + count;
                 }
               }
@@ -982,34 +1041,53 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             }
           };
           
-          const clicksResponse = await axios.post(
-            `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-            clicksPayload,
-            {
-              headers: {
-                'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-                'revision': '2024-10-15',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+          const clicksResponse = await retryApiCall(async () => {
+            return await axios.post(
+              `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+              clicksPayload,
+              {
+                headers: {
+                  'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+                  'revision': '2024-10-15',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                }
               }
-            }
-          );
+            );
+          });
           await delay(); // 0.1s delay
           
           // Store clicks per message ID
           if (clicksResponse.data?.data?.attributes?.data) {
+            console.log(`Clicks response sample: ${JSON.stringify(clicksResponse.data?.data?.attributes?.data?.[0], null, 2)}`);
             clicksResponse.data.data.attributes.data.forEach(group => {
-              // Correct dimensions access: group.dimensions[0]
-              const messageId = group?.dimensions?.[0];
+              // Handle both array and object dimensions formats
+              let messageId = null;
+              if (Array.isArray(group.dimensions)) {
+                messageId = group.dimensions[0];
+              } else if (group.dimensions && typeof group.dimensions === 'object') {
+                messageId = group.dimensions["$message"];
+              }
+              
               if (messageId) {
                 const measurements = group?.measurements;
+                console.log(`Message ${messageId} measurements: ${JSON.stringify(measurements)}`);
+                // Check for both count and unique measurements
+                let count = 0;
                 if (measurements?.count !== undefined) {
-                  let count = 0;
                   if (Array.isArray(measurements.count)) {
                     count = measurements.count.reduce((acc, val) => acc + (parseInt(val) || 0), 0);
                   } else {
                     count = parseInt(measurements.count) || 0;
                   }
+                } else if (measurements?.unique !== undefined) {
+                  if (Array.isArray(measurements.unique)) {
+                    count = measurements.unique.reduce((acc, val) => acc + (parseInt(val) || 0), 0);
+                  } else {
+                    count = parseInt(measurements.unique) || 0;
+                  }
+                }
+                if (count > 0) {
                   messageClicksMap[messageId] = (messageClicksMap[messageId] || 0) + count;
                 }
               }
@@ -1037,34 +1115,53 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             }
           };
           
-          const recipientsResponse = await axios.post(
-            `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-            recipientsPayload,
-            {
-              headers: {
-                'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-                'revision': '2024-10-15',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+          const recipientsResponse = await retryApiCall(async () => {
+            return await axios.post(
+              `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+              recipientsPayload,
+              {
+                headers: {
+                  'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+                  'revision': '2024-10-15',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                }
               }
-            }
-          );
+            );
+          });
           await delay(); // 0.1s delay
           
           // Store recipients per message ID
           if (recipientsResponse.data?.data?.attributes?.data) {
+            console.log(`Recipients response sample: ${JSON.stringify(recipientsResponse.data?.data?.attributes?.data?.[0], null, 2)}`);
             recipientsResponse.data.data.attributes.data.forEach(group => {
-              // Correct dimensions access: group.dimensions[0]
-              const messageId = group?.dimensions?.[0];
+              // Handle both array and object dimensions formats
+              let messageId = null;
+              if (Array.isArray(group.dimensions)) {
+                messageId = group.dimensions[0];
+              } else if (group.dimensions && typeof group.dimensions === 'object') {
+                messageId = group.dimensions["$message"];
+              }
+              
               if (messageId) {
                 const measurements = group?.measurements;
+                console.log(`Message ${messageId} measurements: ${JSON.stringify(measurements)}`);
+                // Check for both count and unique measurements
+                let count = 0;
                 if (measurements?.count !== undefined) {
-                  let count = 0;
                   if (Array.isArray(measurements.count)) {
                     count = measurements.count.reduce((acc, val) => acc + (parseInt(val) || 0), 0);
                   } else {
                     count = parseInt(measurements.count) || 0;
                   }
+                } else if (measurements?.unique !== undefined) {
+                  if (Array.isArray(measurements.unique)) {
+                    count = measurements.unique.reduce((acc, val) => acc + (parseInt(val) || 0), 0);
+                  } else {
+                    count = parseInt(measurements.unique) || 0;
+                  }
+                }
+                if (count > 0) {
                   messageRecipientsMap[messageId] = (messageRecipientsMap[messageId] || 0) + count;
                 }
               }
@@ -1117,18 +1214,20 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
         };
         
         try {
-          const campaignRevenueResponse = await axios.post(
-            `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-            revenuePayload,
-            {
-              headers: {
-                'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-                'revision': '2024-10-15',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+          const campaignRevenueResponse = await retryApiCall(async () => {
+            return await axios.post(
+              `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+              revenuePayload,
+              {
+                headers: {
+                  'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+                  'revision': '2024-10-15',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                }
               }
-            }
-          );
+            );
+          });
           await delay(); // 0.1s delay
           
           // Extract revenue for this campaign with dimension validation
@@ -1185,18 +1284,20 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             }
           };
           
-          const campaignConversionsResponse = await axios.post(
-            `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-            campaignConversionsPayload,
-            {
-              headers: {
-                'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-                'revision': '2024-10-15',
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
+          const campaignConversionsResponse = await retryApiCall(async () => {
+            return await axios.post(
+              `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+              campaignConversionsPayload,
+              {
+                headers: {
+                  'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+                  'revision': '2024-10-15',
+                  'Accept': 'application/json',
+                  'Content-Type': 'application/json'
+                }
               }
-            }
-          );
+            );
+          });
           await delay(); // 0.1s delay
           
           // Extract conversions count for this campaign
@@ -1308,6 +1409,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             'sort': '-updated_at'
           }
         });
+        await delay(); // 0.1s delay
       } catch (error) {
         smsResponse = { data: { data: [] } };
       }
@@ -1343,6 +1445,7 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
           "Accept": "application/json"
         }
       });
+      await delay(); // 0.1s delay
       
       const allFlows = flowsResponse.data.data || [];
       
@@ -1442,18 +1545,20 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             }
           };
           
-          const flowOpensResponse = await axios.post(
-            `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-            flowOpensPayload,
-            {
-              headers: {
-                'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-                'revision': '2024-10-15',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+          const flowOpensResponse = await retryApiCall(async () => {
+            return await axios.post(
+              `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+              flowOpensPayload,
+              {
+                headers: {
+                  'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+                  'revision': '2024-10-15',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                }
               }
-            }
-          );
+            );
+          });
           await delay(); // 0.1s delay
           
           // Sum the count arrays for each flow
@@ -1505,18 +1610,20 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             }
           };
           
-          const flowClicksResponse = await axios.post(
-            `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-            flowClicksPayload,
-            {
-              headers: {
-                'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-                'revision': '2024-10-15',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+          const flowClicksResponse = await retryApiCall(async () => {
+            return await axios.post(
+              `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+              flowClicksPayload,
+              {
+                headers: {
+                  'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+                  'revision': '2024-10-15',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                }
               }
-            }
-          );
+            );
+          });
           await delay(); // 0.1s delay
           
           // Sum the count arrays for each flow
@@ -1567,18 +1674,20 @@ app.get('/api/revenue/total', authenticate, async (req, res) => {
             }
           };
           
-          const flowRecipientsResponse = await axios.post(
-            `${KLAVIYO_BASE_URL}/metric-aggregates/`,
-            flowRecipientsPayload,
-            {
-              headers: {
-                'Authorization': `Klaviyo-API-Key ${userApiKey}`,
-                'revision': '2024-10-15',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+          const flowRecipientsResponse = await retryApiCall(async () => {
+            return await axios.post(
+              `${KLAVIYO_BASE_URL}/metric-aggregates/`,
+              flowRecipientsPayload,
+              {
+                headers: {
+                  'Authorization': `Klaviyo-API-Key ${userApiKey}`,
+                  'revision': '2024-10-15',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                }
               }
-            }
-          );
+            );
+          });
           await delay(); // 0.1s delay
           
           // Sum the count arrays for each flow
